@@ -27,9 +27,9 @@ def generate_portfolio_image(portfolio_df: pd.DataFrame, metadata: dict, max_row
     plt.style.use('dark_background')
     
     # Mathematically lock the heights to eliminate uncontrolled padding
-    header_h = 0.55  # Inches for the top title area
-    footer_h = 0.30  # Inches for the bottom footer area
-    row_h = 0.35     # Inches per table row
+    header_h = 0.02  # Micro margin just to prevent top border clipping
+    footer_h = 0.25  # Inches for the bottom footer area
+    row_h = 0.28     # Inches per table row (tighter rows)
     
     table_h = (len(df) + 1) * row_h  # +1 accounts for the header row
     fig_height = header_h + table_h + footer_h
@@ -42,7 +42,8 @@ def generate_portfolio_image(portfolio_df: pd.DataFrame, metadata: dict, max_row
     fig.patch.set_facecolor(bg_color)
     
     # ─── Eliminate Padding (Subplots Adjust) ───
-    # This locks the drawing area exactly between the header and footer bounds
+    # This locks the drawing area exactly between the header and footer bounds.
+    # The table will snap directly below the top boundary.
     fig.subplots_adjust(
         top=1 - (header_h / fig_height),
         bottom=(footer_h / fig_height),
@@ -54,24 +55,26 @@ def generate_portfolio_image(portfolio_df: pd.DataFrame, metadata: dict, max_row
     table_data = []
     for i, (_, row) in enumerate(df.iterrows()):
         symbol = str(row.get('symbol', 'N/A'))
-        price = f"₹{row.get('price', 0):,.2f}"
         units = f"{int(row.get('units', 0)):,}"
+        price = f"₹{row.get('price', 0):,.2f}"
         weight = f"{row.get('weightage_pct', 0):.2f}%"
         value = f"₹{row.get('value', 0):,.0f}"
         
-        table_data.append([i + 1, symbol, price, units, weight, value])
+        # New order: #, Symbol, Units, Price, Weightage, Total Value
+        table_data.append([i + 1, symbol, units, price, weight, value])
         
-    headers = ["#", "Symbol", "Price", "Units", "Weightage", "Total Value"]
+    headers = ["#", "Symbol", "Units", "Price", "Weightage", "Total Value"]
     
     # ─── Table Creation ───
-    # bbox=[0, 0, 1, 1] forces the table to stretch entirely to the limits of our adjusted bounds,
-    # destroying any remaining space above or below the table.
+    # bbox=[0, 0, 1, 1] forces the table to stretch entirely to the limits of our adjusted bounds.
+    # colWidths distributes widths to shrink the '#' column and balance the rest.
     table = ax.table(
         cellText=table_data, 
         colLabels=headers, 
         loc='center', 
         cellLoc='center',
-        bbox=[0, 0, 1, 1]
+        bbox=[0, 0, 1, 1],
+        colWidths=[0.06, 0.22, 0.16, 0.18, 0.16, 0.22] 
     )
     
     table.auto_set_font_size(False)
@@ -94,7 +97,7 @@ def generate_portfolio_image(portfolio_df: pd.DataFrame, metadata: dict, max_row
             cell.set_text_props(color='#EAEAEA')
             
             # Highlight high weightages slightly
-            if col_idx == 4: # Weightage column
+            if col_idx == 4: # Weightage column (now index 4 based on new order)
                 val_str = table_data[row_idx-1][4].replace('%', '')
                 try:
                     if float(val_str) > 4.5:
@@ -105,35 +108,24 @@ def generate_portfolio_image(portfolio_df: pd.DataFrame, metadata: dict, max_row
     # ─── Footer Details ───
     style = metadata.get('investment_style', 'N/A')
     regime = metadata.get('regime', {}).get('name', 'N/A')
-    now = datetime.now().strftime('%d %b %Y, %H:%M')
+    now = datetime.now().strftime('%d %b %Y')
     
     footer_text = f"PRAGYAM | {style} | Regime: {regime} | {now}"
     
-    # Placed dynamically in the exact middle of the footer height
+    # Placed dynamically near the absolute bottom edge
     plt.figtext(
-        0.5, (footer_h * 0.4 / fig_height), 
+        0.5, (0.08 / fig_height), 
         footer_text, 
-        ha='center', va='center', 
-        color='#777777', 
+        ha='center', va='bottom', 
+        color='#FFFFFF', 
         fontsize=9
     )
     
-    # ─── Title Details ───
-    capital = f"₹{metadata.get('capital', 0):,.0f}"
-    
-    # Placed dynamically in the exact middle of the header height
-    plt.figtext(
-        0.5, 1 - (header_h * 0.5 / fig_height), 
-        f"Curated Portfolio — Capital: {capital}", 
-        ha='center', va='center',
-        color='#FFFFFF', 
-        weight='bold',
-        fontsize=14
-    )
+    # Header was intentionally removed to start the table immediately from the top.
     
     # ─── Export ───
     buf = io.BytesIO()
-    # Explicitly omitting bbox_inches='tight' forces matplotlib to respect our strict math layout
+    # Explicitly omitting bbox_inches='tight' forces matplotlib to respect our strict mathematical layout
     plt.savefig(buf, format='PNG', facecolor=bg_color, dpi=300)
     plt.close()
     buf.seek(0)
