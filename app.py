@@ -4,10 +4,22 @@ import os
 import multiprocessing
 import logging
 import time
+import fcntl  # For file locking
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("pragyam.launcher")
+
+LOCK_FILE = "bot.lock"  # Lock file to prevent duplicates
+
+def acquire_lock():
+    """Acquire a file lock to prevent multiple bot instances."""
+    lock_fd = open(LOCK_FILE, 'w')
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return lock_fd
+    except IOError:
+        return None
 
 def start_bot():
     """Start the Telegram bot in a separate process."""
@@ -39,15 +51,20 @@ def start_dashboard():
         sys.exit(1)
 
 if __name__ == "__main__":
-    # Start bot in a separate process
-    bot_process = multiprocessing.Process(target=start_bot)
-    bot_process.start()
-    
-    # Give bot a moment to initialize
-    time.sleep(2)
+    lock_fd = acquire_lock()
+    if lock_fd is None:
+        logger.warning("Bot lock already acquired—skipping bot start to avoid duplicates.")
+    else:
+        # Start bot in a separate process only if lock acquired
+        bot_process = multiprocessing.Process(target=start_bot)
+        bot_process.start()
+        
+        # Give bot a moment to initialize
+        time.sleep(2)
     
     # Start dashboard in the main process (blocks until exit)
     start_dashboard()
     
-    # Wait for bot process (though it will terminate with the app)
-    bot_process.join()
+    # Clean up lock on exit
+    if lock_fd:
+        os.remove(LOCK_FILE)
