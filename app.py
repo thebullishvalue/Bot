@@ -26,11 +26,9 @@ def start_dashboard():
     """Start the Streamlit dashboard."""
     try:
         logger.info("Starting Admin Dashboard...")
-        # Run Streamlit via subprocess (mimics 'streamlit run')
+        # Run Streamlit via subprocess (mimics 'streamlit run') without port/address
         subprocess.run([
             sys.executable, "-m", "streamlit", "run", "dashboard.py",
-            "--server.port", "8501",
-            "--server.address", "0.0.0.0",
             "--theme.base", "dark"
         ], check=True)
     except subprocess.CalledProcessError as e:
