@@ -78,21 +78,14 @@ SIP_CAPITAL_PRESETS = {
 WELCOME_MSG = """
 PRAGYAM
 प्रज्ञम | Portfolio Intelligence
-by Hemrek Capital
-
-━━━━━━━━━━━━━━━━━━━━
-
+━━━━━━━━━━━━━━━━━━
 Welcome to Pragyam — our institutional-grade portfolio curation engine.
 
 How to use:
 1️⃣  Select your investment style
 2️⃣  Enter your capital amount
 3️⃣  Receive your curated portfolio
-
-Tap /portfolio to begin.
-
-━━━━━━━━━━━━━━━━━━━━
-Hemrek Capital © 2025 | v3.2.0
+━━━━━━━━━━━━━━━━━━
 """
 
 STYLE_MSG = "📈 <b>Select Investment Style:</b>"
