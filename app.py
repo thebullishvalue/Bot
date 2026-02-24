@@ -1,16 +1,16 @@
 import subprocess
 import sys
 import os
-import threading
-import time
+import multiprocessing
 import logging
+import time
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("pragyam.launcher")
 
 def start_bot():
-    """Start the Telegram bot in a thread."""
+    """Start the Telegram bot in a separate process."""
     try:
         from bot import main as bot_main  # Import the bot's main function
         logger.info("Starting Telegram Bot...")
@@ -38,19 +38,16 @@ def start_dashboard():
         logger.error(f"Unexpected error starting dashboard: {e}")
         sys.exit(1)
 
-def main():
-    # Start bot in a background thread
-    bot_thread = threading.Thread(target=start_bot, daemon=True)
-    bot_thread.start()
+if __name__ == "__main__":
+    # Start bot in a separate process
+    bot_process = multiprocessing.Process(target=start_bot)
+    bot_process.start()
     
     # Give bot a moment to initialize
     time.sleep(2)
     
-    # Start dashboard in the main thread (blocks until exit)
+    # Start dashboard in the main process (blocks until exit)
     start_dashboard()
     
-    # Optional: Wait for bot thread (though daemon=True means it exits with main)
-    bot_thread.join()
-
-if __name__ == "__main__":
-    main()
+    # Wait for bot process (though it will terminate with the app)
+    bot_process.join()
