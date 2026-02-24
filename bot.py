@@ -85,7 +85,6 @@ How to use:
 1️⃣  Select your investment style
 2️⃣  Enter your capital amount
 3️⃣  Receive your curated portfolio
-━━━━━━━━━━━━━━━━━━
 """
 
 STYLE_MSG = "📈 <b>Select Investment Style:</b>"
