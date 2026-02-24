@@ -14,9 +14,22 @@ LOCK_FILE = "bot.lock"  # Lock file to prevent duplicates
 
 def acquire_lock():
     """Acquire a file lock to prevent multiple bot instances."""
+    if os.path.exists(LOCK_FILE):
+        logger.warning("Lock file exists—checking if active.")
+        try:
+            with open(LOCK_FILE, 'r') as f:
+                pid = int(f.read().strip())
+                os.kill(pid, 0)  # Check if PID is alive
+                return None  # Active, skip
+        except (ValueError, OSError):
+            logger.info("Stale lock file—removing.")
+            os.remove(LOCK_FILE)
+    
     lock_fd = open(LOCK_FILE, 'w')
     try:
         fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        lock_fd.write(str(os.getpid()))  # Write current PID
+        lock_fd.flush()
         return lock_fd
     except IOError:
         return None
@@ -29,10 +42,8 @@ def start_bot():
         bot_main()  # This runs the bot's polling loop
     except ImportError as e:
         logger.error(f"Failed to import bot.py: {e}")
-        sys.exit(1)
     except Exception as e:
-        logger.error(f"Bot failed: {e}")
-        sys.exit(1)
+        logger.error(f"Bot failed: {e}")  # Log but don't exit
 
 def start_dashboard():
     """Start the Streamlit dashboard."""
@@ -42,13 +53,9 @@ def start_dashboard():
         subprocess.run([
             sys.executable, "-m", "streamlit", "run", "dashboard.py",
             "--theme.base", "dark"
-        ], check=True)
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Dashboard failed with exit code {e.returncode}")
-        sys.exit(e.returncode)
+        ], check=False)  # Don't raise on error
     except Exception as e:
         logger.error(f"Unexpected error starting dashboard: {e}")
-        sys.exit(1)
 
 if __name__ == "__main__":
     lock_fd = acquire_lock()
@@ -62,7 +69,7 @@ if __name__ == "__main__":
         # Give bot a moment to initialize
         time.sleep(2)
     
-    # Start dashboard in the main process (blocks until exit)
+    # Start dashboard in the main process (always, even if bot skips/fails)
     start_dashboard()
     
     # Clean up lock on exit
