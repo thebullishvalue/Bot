@@ -12,6 +12,8 @@ import logging
 import time
 from datetime import datetime
 
+from dotenv import load_dotenv
+
 from telegram import (
     Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardRemove
 )
@@ -48,8 +50,14 @@ from db import (
 )
 from portfolio_image import generate_portfolio_image
 
+# Load environment variables
+load_dotenv()
+
 # ─── Bot Config ───
-TOKEN = "8170366190:AAFbNZALd-iL-FYRLTsPAZn0MJHbBpLPbW8"
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+
+if not TOKEN:
+    raise ValueError("CRITICAL: TELEGRAM_BOT_TOKEN environment variable is not set. Please check your .env file.")
 
 # Conversation states
 SELECT_STYLE, ENTER_CAPITAL, CONFIRM = range(3)
@@ -70,7 +78,10 @@ SIP_CAPITAL_PRESETS = {
 WELCOME_MSG = """
 PRAGYAM
 प्रज्ञम | Portfolio Intelligence
-━━━━━━━━━━━━━━━━━━
+by Hemrek Capital
+
+━━━━━━━━━━━━━━━━━━━━
+
 Welcome to Pragyam — our institutional-grade portfolio curation engine.
 
 How to use:
@@ -78,7 +89,10 @@ How to use:
 2️⃣  Enter your capital amount
 3️⃣  Receive your curated portfolio
 
-━━━━━━━━━━━━━━━━━━
+Tap /portfolio to begin.
+
+━━━━━━━━━━━━━━━━━━━━
+Hemrek Capital © 2025 | v3.2.0
 """
 
 STYLE_MSG = "📈 <b>Select Investment Style:</b>"
@@ -278,8 +292,7 @@ async def confirm_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"<b>Regime:</b> {regime}\n"
                 f"<b>Capital:</b> ₹{capital:,.0f}\n"
                 f"<b>Invested:</b> ₹{total_val:,.0f}\n"
-                f"<b>Positions:</b> {len(portfolio_df)}\n\n"
-                f"<i>Time taken: {duration/60:.1f} mins</i>"
+                f"<b>Positions:</b> {len(portfolio_df)}"
             )
             
             await status_msg.delete()  # Clean up processing msg
