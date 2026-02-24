@@ -103,37 +103,43 @@ def start_dashboard():
 
 # ─── Main ───
 if __name__ == "__main__":
-    # Clean stale files from previous runs
-    _cleanup()
-
-    # Initialize DB (creates tables if needed)
-    try:
-        from db import init_db
-        init_db()
-        logger.info("Database initialized")
-    except Exception as e:
-        logger.error(f"Database init failed: {e}", exc_info=True)
-
-    # Write PID for dashboard status display
-    _write_pid()
-
-    # Handle signals gracefully
-    def _signal_handler(sig, frame):
-        logger.info("Shutdown signal received — cleaning up")
+    # GUARD: Streamlit's script runner sets __name__ = "__main__" when it executes
+    # scripts, but it does so in a worker thread. If we detect we're NOT in the
+    # main thread, Streamlit is running us — bail out to avoid double-launching.
+    if threading.current_thread() is not threading.main_thread():
+        pass  # Streamlit accidentally executed app.py — skip everything
+    else:
+        # Clean stale files from previous runs
         _cleanup()
-        sys.exit(0)
 
-    signal.signal(signal.SIGINT, _signal_handler)
-    signal.signal(signal.SIGTERM, _signal_handler)
+        # Initialize DB (creates tables if needed)
+        try:
+            from db import init_db
+            init_db()
+            logger.info("Database initialized")
+        except Exception as e:
+            logger.error(f"Database init failed: {e}", exc_info=True)
 
-    # Start bot in background thread
-    bot_thread = start_bot_thread()
+        # Write PID for dashboard status display
+        _write_pid()
 
-    # Give bot a moment to initialize before dashboard takes over
-    time.sleep(2)
+        # Handle signals gracefully
+        def _signal_handler(sig, frame):
+            logger.info("Shutdown signal received — cleaning up")
+            _cleanup()
+            sys.exit(0)
 
-    # Start dashboard in foreground (blocks until exit)
-    start_dashboard()
+        signal.signal(signal.SIGINT, _signal_handler)
+        signal.signal(signal.SIGTERM, _signal_handler)
 
-    # Cleanup on exit
-    _cleanup()
+        # Start bot in background thread
+        bot_thread = start_bot_thread()
+
+        # Give bot a moment to initialize before dashboard takes over
+        time.sleep(2)
+
+        # Start dashboard in foreground (blocks until exit)
+        start_dashboard()
+
+        # Cleanup on exit
+        _cleanup()
