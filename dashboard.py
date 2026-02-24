@@ -188,7 +188,7 @@ def read_bot_log(n_lines=300):
         with open(log_path, 'r') as f:
             lines = f.readlines()
         return "".join(lines[-n_lines:])
-    except:
+    except Exception:
         return "Error reading bot.log"
 
 
