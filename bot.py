@@ -45,7 +45,7 @@ for name in ['httpx', 'httpcore', 'telegram.ext', 'urllib3', 'yfinance']:
 
 # ─── Import Modules ───
 from db import (
-    init_db, register_user, log_request_start, log_request_complete,
+    register_user, log_request_start, log_request_complete,
     log_request_error, add_log
 )
 from portfolio_image import generate_portfolio_image
@@ -116,48 +116,28 @@ You will receive a notification here once your portfolio is ready.
 
 
 # ═══════════════════════════════════════
-# ERROR HANDLER
-# ═══════════════════════════════════════
-
-async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
-    """Global error handler — logs errors cleanly instead of spamming the default warning."""
-    logger.error(f"Exception while handling update: {context.error}", exc_info=context.error)
-    # Try to notify the user if possible
-    if isinstance(update, Update) and update.effective_message:
-        try:
-            await update.effective_message.reply_text(
-                "⚠️ Something went wrong. Please try /start again.",
-                parse_mode=ParseMode.HTML
-            )
-        except Exception:
-            pass  # Can't notify user, just log
-
-
-# ═══════════════════════════════════════
 # HANDLERS
 # ═══════════════════════════════════════
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Starts the bot, sends welcome msg, and initiates portfolio flow."""
     user = update.effective_user
-
-    # DB operations are non-crashing — failures are logged, not raised
     register_user(user.id, user.username, user.first_name, user.last_name)
     add_log("INFO", "bot", f"User started bot: @{user.username}", user.id)
-
+    
     # Send the requested welcome message
     await update.message.reply_text(
         WELCOME_MSG,
         parse_mode=ParseMode.HTML,
         reply_markup=ReplyKeyboardRemove()
     )
-
+    
     # Immediately trigger Step 1 (Style Selection)
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("📈 Swing Trading", callback_data="style_Swing Trading")],
         [InlineKeyboardButton("📊 SIP Investment", callback_data="style_SIP Investment")],
     ])
-
+    
     await update.message.reply_text(STYLE_MSG, parse_mode=ParseMode.HTML, reply_markup=keyboard)
     return SELECT_STYLE
 
@@ -165,12 +145,12 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def style_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-
+    
     style = query.data.replace("style_", "")
     context.user_data['investment_style'] = style
-
+    
     presets = SIP_CAPITAL_PRESETS if "SIP" in style else SWING_CAPITAL_PRESETS
-
+    
     buttons = []
     row = []
     for label, val in presets.items():
@@ -181,7 +161,7 @@ async def style_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if row:
         buttons.append(row)
     buttons.append([InlineKeyboardButton("✏️ Custom Amount", callback_data="cap_custom")])
-
+    
     await query.edit_message_text(
         CAPITAL_MSG.format(style=style),
         parse_mode=ParseMode.HTML,
@@ -193,31 +173,31 @@ async def style_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def capital_preset_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-
+    
     data = query.data.replace("cap_", "")
-
+    
     if data == "custom":
         await query.edit_message_text(
             f"💰 <b>Enter Custom Capital Amount (₹)</b>\n\n<i>Reply with a number (e.g., 500000)</i>",
             parse_mode=ParseMode.HTML
         )
         return ENTER_CAPITAL
-
+    
     context.user_data['capital'] = int(data)
     return await _show_confirmation(query, context)
 
 
 async def capital_text_entered(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip().replace(',', '').replace('₹', '').replace(' ', '')
-
+    
     try:
         capital = float(text)
         if capital < 10000:
             await update.message.reply_text("⚠️ Minimum capital is ₹10,000:")
             return ENTER_CAPITAL
-
+        
         context.user_data['capital'] = capital
-
+        
         # Render confirm via message (since it was a text reply)
         style = context.user_data['investment_style']
         keyboard = InlineKeyboardMarkup([
@@ -230,7 +210,7 @@ async def capital_text_entered(update: Update, context: ContextTypes.DEFAULT_TYP
             reply_markup=keyboard
         )
         return CONFIRM
-
+        
     except ValueError:
         await update.message.reply_text("⚠️ Invalid format. Please enter numbers only:")
         return ENTER_CAPITAL
@@ -239,12 +219,12 @@ async def capital_text_entered(update: Update, context: ContextTypes.DEFAULT_TYP
 async def _show_confirmation(query, context):
     style = context.user_data['investment_style']
     capital = context.user_data['capital']
-
+    
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ Generate", callback_data="confirm_yes"),
          InlineKeyboardButton("❌ Cancel", callback_data="confirm_no")]
     ])
-
+    
     await query.edit_message_text(
         CONFIRM_MSG.format(style=style, capital=f"{capital:,.0f}"),
         parse_mode=ParseMode.HTML,
@@ -256,47 +236,47 @@ async def _show_confirmation(query, context):
 async def confirm_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-
+    
     if query.data == "confirm_no":
         await query.edit_message_text("❌ Cancelled.", parse_mode=ParseMode.HTML)
         return ConversationHandler.END
-
+    
     # ─── RUN THE ENGINE ───
     user = query.from_user
     style = context.user_data['investment_style']
     capital = context.user_data['capital']
-
+    
     request_id = log_request_start(user.id, style, capital)
     start_time = time.time()
-
+    
     # Send processing message (replaces current message)
     status_msg = await query.edit_message_text(PROCESSING_MSG, parse_mode=ParseMode.HTML)
-
+    
     # Run engine in executor to avoid blocking
     try:
         from engine import run_pragyam_pipeline
         loop = asyncio.get_event_loop()
-
+        
         # Callback is ignored for user output to keep UX clean, runs silently
         portfolio_df, metadata = await loop.run_in_executor(
             None,
             lambda: run_pragyam_pipeline(style, capital, callback=lambda msg, pct: None)
         )
-
+        
         duration = time.time() - start_time
-
+        
         if portfolio_df is not None and not portfolio_df.empty:
             metadata['capital'] = capital
-
+            
             regime = metadata.get('regime', {}).get('name', 'N/A')
             sel_mode = metadata.get('phases', {}).get('selection', {}).get('mode', 'N/A')
             strats = metadata.get('phases', {}).get('selection', {}).get('strategies', [])
             total_val = metadata.get('phases', {}).get('curation', {}).get('total_value', 0)
-
+            
             log_request_complete(request_id, len(portfolio_df), total_val, regime, sel_mode, strats, duration)
-
+            
             img_bytes = generate_portfolio_image(portfolio_df, metadata)
-
+            
             # Minimal summary
             summary = (
                 f"✅ <b>Portfolio Ready</b>\n\n"
@@ -306,7 +286,7 @@ async def confirm_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"<b>Invested:</b> ₹{total_val:,.0f}\n"
                 f"<b>Positions:</b> {len(portfolio_df)}"
             )
-
+            
             await status_msg.delete()  # Clean up processing msg
             await context.bot.send_photo(
                 chat_id=query.message.chat_id,
@@ -314,24 +294,17 @@ async def confirm_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 caption=summary,
                 parse_mode=ParseMode.HTML
             )
-
+        
         else:
             error_msg = metadata.get('error', 'Unknown error')
             log_request_error(request_id, error_msg, duration)
-            await status_msg.edit_text(
-                f"❌ <b>Failed:</b> {error_msg}\n\nTry /start again.",
-                parse_mode=ParseMode.HTML
-            )
-
+            await status_msg.edit_text(f"❌ <b>Failed:</b> {error_msg}\n\nTry /start again.", parse_mode=ParseMode.HTML)
+    
     except Exception as e:
         duration = time.time() - start_time
         log_request_error(request_id, str(e), duration)
-        logger.error(f"Portfolio generation failed: {e}", exc_info=True)
-        await status_msg.edit_text(
-            "❌ <b>An error occurred processing your request.</b>\nTry /start again.",
-            parse_mode=ParseMode.HTML
-        )
-
+        await status_msg.edit_text("❌ <b>An error occurred processing your request.</b>\nTry /start again.", parse_mode=ParseMode.HTML)
+    
     return ConversationHandler.END
 
 
@@ -354,26 +327,18 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("❌ Cancelled.", reply_markup=ReplyKeyboardRemove())
     return ConversationHandler.END
 
-
 # ═══════════════════════════════════════
 # MAIN
 # ═══════════════════════════════════════
 
 def main():
-    """Build and run the Telegram bot. Called from app.py (thread) or standalone."""
-    # Ensure DB tables exist
-    init_db()
-
     logger.info("Starting PRAGYAM Telegram Bot...")
     app = Application.builder().token(TOKEN).build()
-
-    # Register the global error handler FIRST
-    app.add_error_handler(error_handler)
-
+    
     conv_handler = ConversationHandler(
         entry_points=[
             CommandHandler('start', cmd_start),
-            CommandHandler('portfolio', cmd_start)  # Alias for backwards compatibility
+            CommandHandler('portfolio', cmd_start) # Alias for backwards compatibility
         ],
         states={
             SELECT_STYLE: [CallbackQueryHandler(style_selected, pattern=r'^style_')],
@@ -389,13 +354,12 @@ def main():
         ],
         per_message=False,
     )
-
+    
     app.add_handler(CommandHandler('help', cmd_help))
     app.add_handler(conv_handler)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, fallback_handler))
-
+    
     app.run_polling(drop_pending_updates=True)
-
 
 if __name__ == '__main__':
     main()

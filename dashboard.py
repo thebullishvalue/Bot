@@ -10,6 +10,8 @@ import pandas as pd
 import time
 import os
 import sys
+import subprocess
+import signal
 from datetime import datetime, timedelta
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -19,9 +21,6 @@ from db import (
     get_all_users, get_all_requests, get_recent_logs,
     get_dashboard_stats, get_user_requests, init_db
 )
-
-# Initialize database (creates tables if they don't exist)
-init_db()
 
 # ─── Page Config ───
 st.set_page_config(
@@ -188,7 +187,7 @@ def read_bot_log(n_lines=300):
         with open(log_path, 'r') as f:
             lines = f.readlines()
         return "".join(lines[-n_lines:])
-    except Exception:
+    except:
         return "Error reading bot.log"
 
 
@@ -222,32 +221,56 @@ with st.sidebar:
     
     st.markdown("---")
     
-    # Bot status (managed by app.py — not independently startable)
-    st.markdown('<div class="section-title">Bot Status</div>', unsafe_allow_html=True)
+    # Bot control
+    st.markdown('<div class="section-title">Bot Control</div>', unsafe_allow_html=True)
     
     bot_pid_file = os.path.join(SCRIPT_DIR, "bot.pid")
-    bot_running = False
+    bot_running = os.path.exists(bot_pid_file)
     
-    if os.path.exists(bot_pid_file):
+    if bot_running:
         try:
             with open(bot_pid_file, 'r') as f:
                 pid = int(f.read().strip())
-            os.kill(pid, 0)  # Check if process is alive
-            bot_running = True
+            os.kill(pid, 0)  # Check if process exists
             st.success(f"Bot is running (PID: {pid})")
-        except (ProcessLookupError, ValueError, OSError):
+        except (ProcessLookupError, ValueError):
+            bot_running = False
+            os.remove(bot_pid_file)
             st.warning("Bot is not running")
     else:
         st.warning("Bot is not running")
     
-    st.caption("Bot is managed by app.py — restart the app to restart the bot.")
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("▶️ Start Bot", use_container_width=True, disabled=bot_running):
+            proc = subprocess.Popen(
+                [sys.executable, os.path.join(SCRIPT_DIR, "bot.py")],
+                cwd=SCRIPT_DIR,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True
+            )
+            with open(bot_pid_file, 'w') as f:
+                f.write(str(proc.pid))
+            st.success(f"Started (PID: {proc.pid})")
+            time.sleep(1)
+            st.rerun()
     
-    # DB path info
-    from db import DB_PATH
-    st.markdown(f'<div style="color: #444; font-size: 0.6rem; margin-top: 8px;">DB: {DB_PATH}</div>', unsafe_allow_html=True)
+    with col2:
+        if st.button("⏹️ Stop Bot", use_container_width=True, disabled=not bot_running):
+            try:
+                with open(bot_pid_file, 'r') as f:
+                    pid = int(f.read().strip())
+                os.kill(pid, signal.SIGTERM)
+                os.remove(bot_pid_file)
+                st.info("Bot stopped")
+                time.sleep(1)
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error: {e}")
     
     st.markdown("---")
-    st.markdown(f'<div style="color: #555; font-size: 0.65rem; text-align: center;">v4.0.0 | {datetime.now().strftime("%H:%M:%S")}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div style="color: #555; font-size: 0.65rem; text-align: center;">v3.2.0 | {datetime.now().strftime("%H:%M:%S")}</div>', unsafe_allow_html=True)
 
 
 # ═══════════════════════════════════════

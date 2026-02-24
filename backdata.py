@@ -1,3 +1,4 @@
+import streamlit as st
 import yfinance as yf
 import pandas as pd
 from datetime import datetime, timedelta
@@ -134,6 +135,10 @@ def load_symbols_from_file(filepath: str = "symbols.txt") -> List[str]:
     """
     if not os.path.exists(filepath):
         logging.error(f"Symbol file not found at: {filepath}")
+        try:
+            st.error(f"Symbol file not found: {filepath}")
+        except Exception:
+            pass
         return []
     
     try:
@@ -143,6 +148,10 @@ def load_symbols_from_file(filepath: str = "symbols.txt") -> List[str]:
         return symbols
     except Exception as e:
         logging.error(f"Error reading symbol file {filepath}: {e}")
+        try:
+            st.error(f"Error reading symbol file: {e}")
+        except Exception:
+            pass
         return []
 
 # Load the fixed universe
@@ -184,7 +193,10 @@ def generate_historical_data(
     """
     
     if not symbols_to_process:
-        logging.error("No symbols provided to generate_historical_data.")
+        try:
+            st.error("Error: No symbols provided to generate_historical_data.")
+        except Exception:
+            logging.error("Error: No symbols provided to generate_historical_data.")
         return []
         
     # 1. --- Download Data ---
@@ -207,6 +219,10 @@ def generate_historical_data(
 
     if all_data.empty or all_data['Close'].dropna(how='all').empty:
         logging.error("yf.download returned an empty dataframe or all-NaN Close data.")
+        try:
+            st.error("Could not download any data. Check symbols or date range.")
+        except Exception:
+            print("ERROR: Could not download any data. Check symbols or date range.")
         return []
     
     # --- Clean up failed tickers ---
@@ -217,6 +233,10 @@ def generate_historical_data(
         if invalid_tickers:
             warning_msg = f"Failed to download data for: {', '.join(invalid_tickers)}. They will be skipped."
             logging.warning(warning_msg)
+            try:
+                st.warning(warning_msg)
+            except Exception:
+                print(warning_msg)
                 
             all_data = all_data.loc[:, (slice(None), valid_tickers)]
             symbols_to_process = list(valid_tickers)
@@ -253,7 +273,10 @@ def generate_historical_data(
                 ticker_indicator_cache[ticker] = indicators_df
                 
         except (pd.errors.DataError, KeyError, IndexError):
-            logging.warning(f"Skipping {ticker} due to a data quality error during indicator calculation.")
+            try:
+                st.warning(f"⚠️ Skipping {ticker} due to a data quality error during indicator calculation.")
+            except Exception:
+                print(f"⚠️ Skipping {ticker} due to a data quality error during indicator calculation.")
             continue
 
     # 3. --- Generate Daily Snapshots in Memory ---
@@ -306,7 +329,6 @@ def generate_historical_data(
 # --- Main Application UI and Logic ---
 # This remains so the app can be run standalone
 def main():
-    import streamlit as st  # Only needed for standalone UI mode
     # --- PAGE CONFIG MOVED HERE ---
     st.set_page_config(
         page_title="Indicator Snapshot Generator (Optimized)",
