@@ -1,0 +1,89 @@
+2026-02-24 21:23:44,515 | INFO    | pragyam.bot | ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2026-02-24 21:23:44,515 | INFO    | pragyam.bot | PRAGYAM TELEGRAM BOT — Starting
+2026-02-24 21:23:44,515 | INFO    | pragyam.bot | Token: ...bBpLPbW8
+2026-02-24 21:23:44,515 | INFO    | pragyam.bot | ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2026-02-24 21:23:45,385 | INFO    | pragyam.bot | Bot is running. Polling for updates...
+2026-02-24 21:23:47,112 | INFO    | apscheduler.scheduler | Scheduler started
+2026-02-24 21:24:06,638 | INFO    | pragyam.bot | NEW USER: @None (ID: 1646634290)
+2026-02-24 21:24:27,039 | INFO    | pragyam.bot | PORTFOLIO FLOW: @None (ID: 1646634290)
+2026-02-24 21:24:40,955 | INFO    | pragyam.bot | STYLE SELECTED: SIP Investment by user 1646634290
+2026-02-24 21:25:04,619 | INFO    | pragyam.bot | ═══ GENERATING PORTFOLIO ═══
+2026-02-24 21:25:04,619 | INFO    | pragyam.bot |   User: @None (ID: 1646634290)
+2026-02-24 21:25:04,620 | INFO    | pragyam.bot |   Style: SIP Investment
+2026-02-24 21:25:04,620 | INFO    | pragyam.bot |   Capital: ₹25,000
+2026-02-24 21:25:26,997 | INFO    | root | Loaded 30 symbols from symbols.txt
+2026-02-24 21:25:27,018 | INFO    | pragyam.engine | ━━ PHASE 1/4: DATA FETCHING ━━
+2026-02-24 21:25:27,018 | INFO    | pragyam.engine | Downloading 30 symbols...
+2026-02-24 21:25:27,020 | INFO    | root | --- yfinance: Attempting to download 30 symbols...
+2026-02-24 21:25:32,988 | INFO    | root | yf.download successful. Data shape: (2438, 150). Valid tickers: 30
+2026-02-24 21:25:46,037 | INFO    | pragyam.engine | Loaded 2302 trading days
+2026-02-24 21:25:46,037 | INFO    | pragyam.engine | ━━ REGIME DETECTION ━━
+2026-02-24 21:25:46,047 | INFO    | pragyam.engine | Regime: BULL → Bull Market Mix (75%)
+2026-02-24 21:25:46,047 | INFO    | pragyam.engine | ━━ PHASE 2/4: STRATEGY SELECTION ━━
+2026-02-24 21:25:46,048 | INFO    | StrategySelection | Fetching breadth data from Google Sheets...
+2026-02-24 21:25:55,929 | INFO    | StrategySelection | Loaded 600 rows: 2023-09-21 to 2026-02-24
+2026-02-24 21:25:55,930 | INFO    | pragyam.engine | Loaded 600 trigger entries
+2026-02-24 21:27:03,630 | INFO    | pragyam.engine | Dynamic selection: Top 4 by calmar: ['VelocityApocalypse', 'VelocityVortex', 'MomentumAccelerator', 'GameTheoreticStrategy']
+2026-02-24 21:27:03,631 | INFO    | pragyam.engine | Selected 4 strategies (DYNAMIC)
+2026-02-24 21:27:03,631 | INFO    | pragyam.engine | ━━ PHASE 3/4: WALK-FORWARD EVALUATION ━━
+2026-02-24 21:30:31,835 | INFO    | pragyam.engine | ━━ PHASE 4/4: PORTFOLIO CURATION ━━
+2026-02-24 21:30:31,947 | INFO    | pragyam.engine | ✅ COMPLETE: 30 positions curated
+2026-02-24 21:30:31,960 | INFO    | pragyam.bot |   ✅ SUCCESS: 30 positions in 327.3s
+2026-02-24 22:06:18,792 | INFO    | pragyam.bot | Starting PRAGYAM Telegram Bot...
+2026-02-24 22:06:20,741 | INFO    | apscheduler.scheduler | Scheduler started
+2026-02-24 22:06:51,388 | INFO    | root | Loaded 30 symbols from symbols.txt
+2026-02-24 22:06:51,400 | INFO    | pragyam.engine | ━━ PHASE 1/4: DATA FETCHING ━━
+2026-02-24 22:06:51,400 | INFO    | pragyam.engine | Downloading 30 symbols...
+2026-02-24 22:06:51,401 | INFO    | root | --- yfinance: Attempting to download 30 symbols...
+2026-02-24 22:06:56,506 | INFO    | root | yf.download successful. Data shape: (2438, 150). Valid tickers: 30
+2026-02-24 22:07:05,950 | INFO    | pragyam.engine | Loaded 2302 trading days
+2026-02-24 22:07:05,950 | INFO    | pragyam.engine | ━━ REGIME DETECTION ━━
+2026-02-24 22:07:05,957 | INFO    | pragyam.engine | Regime: BULL → Bull Market Mix (75%)
+2026-02-24 22:07:05,957 | INFO    | pragyam.engine | ━━ PHASE 2/4: STRATEGY SELECTION ━━
+2026-02-24 22:07:05,957 | INFO    | StrategySelection | Fetching breadth data from Google Sheets...
+2026-02-24 22:07:09,767 | INFO    | StrategySelection | Loaded 600 rows: 2023-09-21 to 2026-02-24
+2026-02-24 22:07:09,768 | INFO    | pragyam.engine | Loaded 600 trigger entries
+2026-02-24 22:07:20,308 | INFO    | pragyam.engine | Dynamic selection: Top 4 by sortino: ['CelestialAlphaForge', 'GameTheoreticStrategy', 'WormholeTemporal', 'PantheonAlphaRealm']
+2026-02-24 22:07:20,308 | INFO    | pragyam.engine | Selected 4 strategies (DYNAMIC)
+2026-02-24 22:07:20,308 | INFO    | pragyam.engine | ━━ PHASE 3/4: WALK-FORWARD EVALUATION ━━
+2026-02-24 22:10:47,691 | INFO    | pragyam.engine | ━━ PHASE 4/4: PORTFOLIO CURATION ━━
+2026-02-24 22:10:47,825 | INFO    | pragyam.engine | ✅ COMPLETE: 30 positions curated
+2026-02-24 22:22:56,373 | INFO    | pragyam.engine | ━━ PHASE 1/4: DATA FETCHING ━━
+2026-02-24 22:22:56,373 | INFO    | pragyam.engine | Downloading 30 symbols...
+2026-02-24 22:22:56,373 | INFO    | root | --- yfinance: Attempting to download 30 symbols...
+2026-02-24 22:23:02,891 | INFO    | root | yf.download successful. Data shape: (2438, 150). Valid tickers: 30
+2026-02-24 22:23:14,156 | INFO    | pragyam.engine | Loaded 2302 trading days
+2026-02-24 22:23:14,156 | INFO    | pragyam.engine | ━━ REGIME DETECTION ━━
+2026-02-24 22:23:14,163 | INFO    | pragyam.engine | Regime: BULL → Bull Market Mix (75%)
+2026-02-24 22:23:14,163 | INFO    | pragyam.engine | ━━ PHASE 2/4: STRATEGY SELECTION ━━
+2026-02-24 22:23:14,163 | INFO    | StrategySelection | Fetching breadth data from Google Sheets...
+2026-02-24 22:23:23,446 | INFO    | StrategySelection | Loaded 600 rows: 2023-09-21 to 2026-02-24
+2026-02-24 22:23:23,447 | INFO    | pragyam.engine | Loaded 600 trigger entries
+2026-02-24 22:24:15,479 | INFO    | pragyam.engine | Dynamic selection: Top 4 by calmar: ['VelocityApocalypse', 'VelocityVortex', 'MomentumAccelerator', 'GameTheoreticStrategy']
+2026-02-24 22:24:15,479 | INFO    | pragyam.engine | Selected 4 strategies (DYNAMIC)
+2026-02-24 22:24:15,479 | INFO    | pragyam.engine | ━━ PHASE 3/4: WALK-FORWARD EVALUATION ━━
+2026-02-24 22:27:07,163 | INFO    | pragyam.engine | ━━ PHASE 4/4: PORTFOLIO CURATION ━━
+2026-02-24 22:27:07,267 | INFO    | pragyam.engine | ✅ COMPLETE: 30 positions curated
+2026-02-24 22:28:00,403 | INFO    | pragyam.bot | Starting PRAGYAM Telegram Bot...
+2026-02-24 22:28:02,121 | INFO    | apscheduler.scheduler | Scheduler started
+2026-02-24 22:34:21,025 | INFO    | pragyam.bot | Starting PRAGYAM Telegram Bot...
+2026-02-24 22:34:23,000 | INFO    | apscheduler.scheduler | Scheduler started
+2026-02-24 22:35:42,792 | INFO    | pragyam.bot | Starting PRAGYAM Telegram Bot...
+2026-02-24 22:35:44,281 | INFO    | apscheduler.scheduler | Scheduler started
+2026-02-24 22:41:21,959 | INFO    | pragyam.bot | Starting PRAGYAM Telegram Bot...
+2026-02-24 22:41:23,717 | INFO    | apscheduler.scheduler | Scheduler started
+2026-02-24 22:41:43,216 | INFO    | root | Loaded 30 symbols from symbols.txt
+2026-02-24 22:41:43,222 | INFO    | pragyam.engine | ━━ PHASE 1/4: DATA FETCHING ━━
+2026-02-24 22:41:43,222 | INFO    | pragyam.engine | Downloading 30 symbols...
+2026-02-24 22:41:43,222 | INFO    | root | --- yfinance: Attempting to download 30 symbols...
+2026-02-24 22:41:47,030 | INFO    | root | yf.download successful. Data shape: (327, 150). Valid tickers: 30
+2026-02-24 22:41:49,926 | INFO    | pragyam.engine | Loaded 193 trading days
+2026-02-24 22:41:49,926 | INFO    | pragyam.engine | ━━ REGIME DETECTION ━━
+2026-02-24 22:41:49,937 | INFO    | pragyam.engine | Regime: CHOP → Chop/Consolidate Mix (60%)
+2026-02-24 22:41:49,937 | INFO    | pragyam.engine | ━━ PHASE 2/4: STRATEGY SELECTION ━━
+2026-02-24 22:41:49,937 | INFO    | StrategySelection | Fetching breadth data from Google Sheets...
+2026-02-24 22:41:58,281 | INFO    | StrategySelection | Loaded 600 rows: 2023-09-21 to 2026-02-24
+2026-02-24 22:41:58,283 | INFO    | pragyam.engine | Loaded 600 trigger entries
+2026-02-24 22:42:47,445 | INFO    | pragyam.engine | Dynamic selection: Top 4 by calmar: ['VelocityApocalypse', 'VelocityVortex', 'MomentumAccelerator', 'AdaptiveVolBreakout']
+2026-02-24 22:42:47,446 | INFO    | pragyam.engine | Selected 4 strategies (DYNAMIC)
+2026-02-24 22:42:47,446 | INFO    | pragyam.engine | ━━ PHASE 3/4: WALK-FORWARD EVALUATION ━━
