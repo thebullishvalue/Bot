@@ -470,33 +470,114 @@ def compute_portfolio_return(portfolio, next_prices):
 
 
 def calculate_advanced_metrics(returns_with_dates):
-    default = {'total_return': 0, 'annual_return': 0, 'volatility': 0, 'sharpe': 0, 'sortino': 0,
-               'max_drawdown': 0, 'calmar': 0, 'win_rate': 0, 'kelly_criterion': 0}
+    """
+    Calculate comprehensive risk-adjusted performance metrics.
+    Matches Pragyam app.py calculate_advanced_metrics exactly.
+    """
+    default_metrics = {
+        'total_return': 0, 'annual_return': 0, 'volatility': 0,
+        'sharpe': 0, 'sortino': 0, 'max_drawdown': 0, 'calmar': 0,
+        'win_rate': 0, 'kelly_criterion': 0, 'omega_ratio': 1.0,
+        'tail_ratio': 1.0, 'gain_to_pain': 0, 'profit_factor': 1.0
+    }
     if len(returns_with_dates) < 2:
-        return default, 52
-    df = pd.DataFrame(returns_with_dates).sort_values('date').set_index('date')
-    td = df.index.to_series().diff().dt.days
-    avg_days = td.mean()
-    ppy = 365.25 / avg_days if pd.notna(avg_days) and avg_days > 0 else 52
-    rets = df['return']
-    total_ret = (1 + rets).prod() - 1
-    years = len(rets) / ppy
-    annual_ret = (1 + total_ret) ** (1 / years) - 1 if years > 0 and total_ret > -1 else 0
-    vol = rets.std(ddof=1) * np.sqrt(ppy)
-    sharpe = np.clip(annual_ret / vol if vol > 0.001 else 0, -10, 10)
-    ds = rets[rets < 0]
-    ds_vol = ds.std(ddof=1) * np.sqrt(ppy) if len(ds) >= 2 else 0
-    sortino = np.clip(annual_ret / ds_vol if ds_vol > 0.001 else 0, -20, 20)
-    cum = (1 + rets).cumprod()
-    rm = cum.expanding().max()
-    mdd = ((cum / rm) - 1).min()
-    calmar = np.clip(annual_ret / abs(mdd) if mdd < -0.001 else 0, -20, 20)
-    wr = (rets > 0).mean()
-    return {
-        'total_return': total_ret, 'annual_return': annual_ret, 'volatility': vol,
-        'sharpe': sharpe, 'sortino': sortino, 'max_drawdown': mdd, 'calmar': calmar,
-        'win_rate': wr, 'kelly_criterion': 0
-    }, ppy
+        return default_metrics, 52
+
+    returns_df = pd.DataFrame(returns_with_dates).sort_values('date').set_index('date')
+    time_deltas = returns_df.index.to_series().diff().dt.days
+    avg_period_days = time_deltas.mean()
+    periods_per_year = 365.25 / avg_period_days if pd.notna(avg_period_days) and avg_period_days > 0 else 52
+
+    returns = returns_df['return']
+    n_periods = len(returns)
+
+    # Total Return (geometric)
+    total_return = (1 + returns).prod() - 1
+
+    # CAGR
+    years = n_periods / periods_per_year
+    if years > 0 and total_return > -1:
+        annual_return = (1 + total_return) ** (1 / years) - 1
+    else:
+        annual_return = 0
+
+    # Volatility (annualized standard deviation)
+    volatility = returns.std(ddof=1) * np.sqrt(periods_per_year)
+
+    # Sharpe Ratio (assuming risk-free rate = 0)
+    sharpe = annual_return / volatility if volatility > 0.001 else 0
+    sharpe = np.clip(sharpe, -10, 10)
+
+    # Sortino Ratio (downside deviation)
+    downside_returns = returns[returns < 0]
+    if len(downside_returns) >= 2:
+        downside_vol = downside_returns.std(ddof=1) * np.sqrt(periods_per_year)
+        sortino = annual_return / downside_vol if downside_vol > 0.001 else 0
+    else:
+        sortino = 0
+    sortino = np.clip(sortino, -20, 20)
+
+    # Maximum Drawdown
+    cumulative = (1 + returns).cumprod()
+    running_max = cumulative.expanding(min_periods=1).max()
+    drawdown_series = (cumulative / running_max) - 1
+    max_drawdown = drawdown_series.min()
+
+    # Calmar Ratio
+    calmar = annual_return / abs(max_drawdown) if max_drawdown < -0.001 else 0
+    calmar = np.clip(calmar, -20, 20)
+
+    # Win Rate
+    win_rate = (returns > 0).mean()
+
+    # Win/Loss Statistics
+    gains = returns[returns > 0]
+    losses = returns[returns < 0]
+    avg_win = gains.mean() if len(gains) > 0 else 0
+    avg_loss = abs(losses.mean()) if len(losses) > 0 else 0
+    total_gains = gains.sum() if len(gains) > 0 else 0
+    total_losses = abs(losses.sum()) if len(losses) > 0 else 0
+
+    # Kelly Criterion: f* = W - (1-W)/R where W=win_rate, R=avg_win/avg_loss
+    win_loss_ratio = avg_win / avg_loss if avg_loss > 0.0001 else 0
+    kelly = (win_rate - ((1 - win_rate) / win_loss_ratio)) if win_loss_ratio > 0 else 0
+    kelly = np.clip(kelly, -1, 1)
+
+    # Omega Ratio
+    omega_ratio = total_gains / total_losses if total_losses > 0.0001 else (total_gains * 10 if total_gains > 0 else 1.0)
+    omega_ratio = np.clip(omega_ratio, 0, 50)
+
+    # Profit Factor
+    profit_factor = total_gains / total_losses if total_losses > 0.0001 else (10.0 if total_gains > 0 else 1.0)
+    profit_factor = np.clip(profit_factor, 0, 50)
+
+    # Tail Ratio
+    upper_tail = np.percentile(returns, 95) if len(returns) >= 20 else returns.max()
+    lower_tail = abs(np.percentile(returns, 5)) if len(returns) >= 20 else abs(returns.min())
+    tail_ratio = upper_tail / lower_tail if lower_tail > 0.0001 else (10.0 if upper_tail > 0 else 1.0)
+    tail_ratio = np.clip(tail_ratio, 0, 20)
+
+    # Gain-to-Pain Ratio
+    pain = abs(losses.sum()) if len(losses) > 0 else 0
+    gain_to_pain = returns.sum() / pain if pain > 0.0001 else (returns.sum() * 10 if returns.sum() > 0 else 0)
+    gain_to_pain = np.clip(gain_to_pain, -20, 20)
+
+    metrics = {
+        'total_return': total_return,
+        'annual_return': annual_return,
+        'volatility': volatility,
+        'sharpe': sharpe,
+        'sortino': sortino,
+        'max_drawdown': max_drawdown,
+        'calmar': calmar,
+        'win_rate': win_rate,
+        'kelly_criterion': kelly,
+        'omega_ratio': omega_ratio,
+        'tail_ratio': tail_ratio,
+        'gain_to_pain': gain_to_pain,
+        'profit_factor': profit_factor
+    }
+    return metrics, periods_per_year
 
 
 def calculate_strategy_weights(performance):
@@ -1006,7 +1087,7 @@ def run_pragyam_pipeline(investment_style: str, capital: float, callback=None) -
     
     lookback = 100
     end_date = datetime.now()
-    total_days = int((lookback + MAX_INDICATOR_PERIOD) * 1.5) + 30
+    total_days = int((lookback + MAX_INDICATOR_PERIOD) * 12)
     fetch_start = end_date - timedelta(days=total_days)
 
     update(f"Downloading {len(SYMBOLS_UNIVERSE)} symbols...", 0.08)
