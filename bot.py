@@ -2,6 +2,11 @@
 PRAGYAM Telegram Bot
 ━━━━━━━━━━━━━━━━━━━━
 Minimal, professional Telegram interface for Pragyam Portfolio Intelligence.
+
+Concurrency model:
+    • PTB handles multiple users simultaneously (concurrent_updates=True)
+    • Engine runs in a dedicated ThreadPoolExecutor (10 workers = 10 parallel portfolios)
+    • Bot polling works in both main thread and daemon thread (Streamlit Cloud)
 """
 
 import os
@@ -10,6 +15,9 @@ import io
 import asyncio
 import logging
 import time
+import warnings
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 from dotenv import load_dotenv
@@ -22,6 +30,9 @@ from telegram.ext import (
     MessageHandler, ConversationHandler, filters, ContextTypes
 )
 from telegram.constants import ChatAction, ParseMode
+
+# ─── Suppress PTB per_message warning (we intentionally use per_message=False) ───
+warnings.filterwarnings("ignore", message=".*per_message.*", category=UserWarning)
 
 # ─── Setup Path ───
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -57,7 +68,11 @@ load_dotenv()
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
 if not TOKEN:
-    raise ValueError("CRITICAL: TELEGRAM_BOT_TOKEN environment variable is not set. Please check your .env file.")
+    raise ValueError("CRITICAL: TELEGRAM_BOT_TOKEN environment variable is not set.")
+
+# ─── Engine Thread Pool ───
+# Dedicated pool for heavy portfolio generation — 10 concurrent users max
+ENGINE_POOL = ThreadPoolExecutor(max_workers=10, thread_name_prefix="pragyam-engine")
 
 # Conversation states
 SELECT_STYLE, ENTER_CAPITAL, CONFIRM = range(3)
@@ -120,9 +135,8 @@ You will receive a notification here once your portfolio is ready.
 # ═══════════════════════════════════════
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
-    """Global error handler — logs errors cleanly instead of spamming the default warning."""
+    """Global error handler — logs errors cleanly."""
     logger.error(f"Exception while handling update: {context.error}", exc_info=context.error)
-    # Try to notify the user if possible
     if isinstance(update, Update) and update.effective_message:
         try:
             await update.effective_message.reply_text(
@@ -130,7 +144,7 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode=ParseMode.HTML
             )
         except Exception:
-            pass  # Can't notify user, just log
+            pass
 
 
 # ═══════════════════════════════════════
@@ -140,19 +154,15 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Starts the bot, sends welcome msg, and initiates portfolio flow."""
     user = update.effective_user
-
-    # DB operations are non-crashing — failures are logged, not raised
     register_user(user.id, user.username, user.first_name, user.last_name)
     add_log("INFO", "bot", f"User started bot: @{user.username}", user.id)
 
-    # Send the requested welcome message
     await update.message.reply_text(
         WELCOME_MSG,
         parse_mode=ParseMode.HTML,
         reply_markup=ReplyKeyboardRemove()
     )
 
-    # Immediately trigger Step 1 (Style Selection)
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("📈 Swing Trading", callback_data="style_Swing Trading")],
         [InlineKeyboardButton("📊 SIP Investment", callback_data="style_SIP Investment")],
@@ -198,7 +208,7 @@ async def capital_preset_selected(update: Update, context: ContextTypes.DEFAULT_
 
     if data == "custom":
         await query.edit_message_text(
-            f"💰 <b>Enter Custom Capital Amount (₹)</b>\n\n<i>Reply with a number (e.g., 500000)</i>",
+            "💰 <b>Enter Custom Capital Amount (₹)</b>\n\n<i>Reply with a number (e.g., 500000)</i>",
             parse_mode=ParseMode.HTML
         )
         return ENTER_CAPITAL
@@ -218,7 +228,6 @@ async def capital_text_entered(update: Update, context: ContextTypes.DEFAULT_TYP
 
         context.user_data['capital'] = capital
 
-        # Render confirm via message (since it was a text reply)
         style = context.user_data['investment_style']
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("✅ Generate", callback_data="confirm_yes"),
@@ -267,19 +276,19 @@ async def confirm_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     capital = context.user_data['capital']
 
     request_id = log_request_start(user.id, style, capital)
+    add_log("INFO", "engine", f"Portfolio requested: {style} ₹{capital:,.0f}", user.id)
     start_time = time.time()
 
-    # Send processing message (replaces current message)
+    # Send processing message
     status_msg = await query.edit_message_text(PROCESSING_MSG, parse_mode=ParseMode.HTML)
 
-    # Run engine in executor to avoid blocking
+    # Run engine in dedicated thread pool — allows multiple users to generate simultaneously
     try:
         from engine import run_pragyam_pipeline
         loop = asyncio.get_event_loop()
 
-        # Callback is ignored for user output to keep UX clean, runs silently
         portfolio_df, metadata = await loop.run_in_executor(
-            None,
+            ENGINE_POOL,
             lambda: run_pragyam_pipeline(style, capital, callback=lambda msg, pct: None)
         )
 
@@ -297,23 +306,25 @@ async def confirm_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             img_bytes = generate_portfolio_image(portfolio_df, metadata)
 
-            # Minimal summary
             summary = (
                 f"✅ <b>Portfolio Ready</b>\n\n"
                 f"<b>Style:</b> {style}\n"
                 f"<b>Regime:</b> {regime}\n"
                 f"<b>Capital:</b> ₹{capital:,.0f}\n"
                 f"<b>Invested:</b> ₹{total_val:,.0f}\n"
-                f"<b>Positions:</b> {len(portfolio_df)}"
+                f"<b>Positions:</b> {len(portfolio_df)}\n"
+                f"<b>Duration:</b> {duration:.0f}s"
             )
 
-            await status_msg.delete()  # Clean up processing msg
+            await status_msg.delete()
             await context.bot.send_photo(
                 chat_id=query.message.chat_id,
                 photo=io.BytesIO(img_bytes),
                 caption=summary,
                 parse_mode=ParseMode.HTML
             )
+
+            add_log("INFO", "engine", f"Portfolio delivered: {len(portfolio_df)} positions in {duration:.0f}s", user.id)
 
         else:
             error_msg = metadata.get('error', 'Unknown error')
@@ -326,11 +337,14 @@ async def confirm_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         duration = time.time() - start_time
         log_request_error(request_id, str(e), duration)
-        logger.error(f"Portfolio generation failed: {e}", exc_info=True)
-        await status_msg.edit_text(
-            "❌ <b>An error occurred processing your request.</b>\nTry /start again.",
-            parse_mode=ParseMode.HTML
-        )
+        logger.error(f"Portfolio generation failed for user {user.id}: {e}", exc_info=True)
+        try:
+            await status_msg.edit_text(
+                "❌ <b>An error occurred processing your request.</b>\nTry /start again.",
+                parse_mode=ParseMode.HTML
+            )
+        except Exception:
+            pass
 
     return ConversationHandler.END
 
@@ -356,29 +370,24 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ═══════════════════════════════════════
-# MAIN
+# BOT BUILDER
 # ═══════════════════════════════════════
 
-def main():
-    """Build and run the Telegram bot.
-    
-    Works both as main thread (python bot.py) and daemon thread (from app.py).
-    Uses manual async loop instead of run_polling() to avoid signal handler issues
-    when running inside a non-main thread (Streamlit Cloud).
-    """
-    # Ensure DB tables exist
-    init_db()
+def _build_app() -> Application:
+    """Build the PTB Application with all handlers configured."""
+    app = (
+        Application.builder()
+        .token(TOKEN)
+        .concurrent_updates(True)   # Process multiple users in parallel
+        .build()
+    )
 
-    logger.info("Starting PRAGYAM Telegram Bot...")
-    app = Application.builder().token(TOKEN).build()
-
-    # Register the global error handler FIRST
     app.add_error_handler(error_handler)
 
     conv_handler = ConversationHandler(
         entry_points=[
             CommandHandler('start', cmd_start),
-            CommandHandler('portfolio', cmd_start)  # Alias for backwards compatibility
+            CommandHandler('portfolio', cmd_start),
         ],
         states={
             SELECT_STYLE: [CallbackQueryHandler(style_selected, pattern=r'^style_')],
@@ -399,35 +408,63 @@ def main():
     app.add_handler(conv_handler)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, fallback_handler))
 
-    # ─── Run polling manually (thread-safe, no signal handlers) ───
-    # app.run_polling() is a convenience wrapper that calls signal.signal()
-    # internally — which crashes when running in a non-main thread.
-    # Instead, we build our own async loop.
+    return app
 
-    import threading
+
+# ═══════════════════════════════════════
+# MAIN — Thread-aware startup
+# ═══════════════════════════════════════
+
+def main():
+    """Start the bot. Auto-detects main thread vs daemon thread."""
+    init_db()
+    logger.info("Starting PRAGYAM Telegram Bot...")
+
     if threading.current_thread() is threading.main_thread():
-        # Running standalone (python bot.py) — use the simple convenience method
+        # Standalone: python bot.py — use the convenience method (has signal handlers)
+        app = _build_app()
         app.run_polling(drop_pending_updates=True)
     else:
-        # Running inside a thread (from app.py / Streamlit) — manual async loop
-        _run_polling_in_thread(app)
+        # Daemon thread from app.py / Streamlit — manual async loop
+        _run_in_thread()
 
 
-def _run_polling_in_thread(app):
-    """Run the bot's polling loop in a non-main thread without signal handlers."""
+def _run_in_thread():
+    """Run the bot polling loop in a non-main thread.
+    
+    Key details:
+        • Creates its own event loop (threads don't have one by default)
+        • Calls delete_webhook() FIRST to kill any lingering previous session
+          and prevent the "Conflict: terminated by other getUpdates" error
+        • No signal handlers (they're main-thread-only in Python)
+    """
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
+
+    app = _build_app()
 
     async def _run():
         try:
             await app.initialize()
+
+            # ─── Force takeover: kill any previous polling session ───
+            # Without this, redeploying on Render/Streamlit Cloud causes
+            # "Conflict: terminated by other getUpdates request" because
+            # the old process might still be polling for a few seconds.
+            await app.bot.delete_webhook(drop_pending_updates=True)
+            logger.info("Cleared previous webhook/polling session")
+
             await app.start()
-            await app.updater.start_polling(drop_pending_updates=True)
+            await app.updater.start_polling(
+                drop_pending_updates=True,
+                allowed_updates=Update.ALL_TYPES,
+            )
             logger.info("PRAGYAM Bot is polling for updates...")
 
-            # Keep running until the thread is killed (daemon thread dies with process)
+            # Keep alive until daemon thread is killed with the process
             while True:
                 await asyncio.sleep(1)
+
         except asyncio.CancelledError:
             pass
         except Exception as e:

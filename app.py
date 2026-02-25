@@ -58,24 +58,31 @@ import db as _db_module
 
 
 def _ensure_bot_running():
-    """Start the Telegram bot thread exactly once per process lifetime."""
-    if getattr(_db_module, '_bot_thread_started', False):
-        return  # Already running from a previous Streamlit rerun
+    """Start the Telegram bot thread exactly once per process lifetime.
+    Also verifies the thread is still alive — restarts if it crashed."""
 
-    # Use a lock in case of race conditions during first render
+    # Fast check: if we have a living thread, skip
+    existing_thread = getattr(_db_module, '_bot_thread', None)
+    if existing_thread is not None and existing_thread.is_alive():
+        return
+
+    # Use a lock for thread-safe first-start
     _lock = getattr(_db_module, '_bot_lock', None)
     if _lock is None:
         _db_module._bot_lock = threading.Lock()
         _lock = _db_module._bot_lock
 
     with _lock:
-        if getattr(_db_module, '_bot_thread_started', False):
+        # Double-check inside lock
+        existing_thread = getattr(_db_module, '_bot_thread', None)
+        if existing_thread is not None and existing_thread.is_alive():
             return
+
         try:
             from bot import main as bot_main
             t = threading.Thread(target=bot_main, name="telegram-bot", daemon=True)
             t.start()
-            _db_module._bot_thread_started = True
+            _db_module._bot_thread = t
             logger.info("━━ Telegram Bot thread started ━━")
 
             # Write PID so dashboard sidebar can show bot status
