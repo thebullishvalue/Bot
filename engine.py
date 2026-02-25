@@ -656,17 +656,116 @@ def curate_final_portfolio(strategies, performance, current_df, capital, num_pos
     return fp.sort_values('weightage_pct', ascending=False).reset_index(drop=True), sw, subset_w
 
 
+def _compute_backtest_metrics(daily_values, periods_per_year=252.0):
+    """
+    Compute performance metrics from daily portfolio values.
+    Returns realistic, unbounded metrics for proper comparison.
+    Matches Pragyam app.py _compute_backtest_metrics exactly.
+    """
+    result = {
+        'total_return': 0.0,
+        'ann_return': 0.0,
+        'volatility': 0.0,
+        'sharpe': 0.0,
+        'sortino': 0.0,
+        'calmar': 0.0,
+        'max_dd': 0.0,
+        'win_rate': 0.0
+    }
+
+    if len(daily_values) < 5:
+        return result
+
+    values = np.array(daily_values, dtype=np.float64)
+
+    # Validate data
+    if np.any(values <= 0) or np.any(~np.isfinite(values)):
+        return result
+
+    initial = values[0]
+    final = values[-1]
+    n_days = len(values)
+
+    # Total Return
+    total_return = (final - initial) / initial
+    result['total_return'] = total_return
+
+    # Daily Returns
+    daily_returns = np.diff(values) / values[:-1]
+    daily_returns = daily_returns[np.isfinite(daily_returns)]
+
+    if len(daily_returns) < 3:
+        return result
+
+    # Annualized Return (CAGR)
+    years = n_days / periods_per_year
+    if years > 0 and final > 0 and initial > 0:
+        ann_return = (final / initial) ** (1.0 / years) - 1.0
+    else:
+        ann_return = 0.0
+    result['ann_return'] = ann_return
+
+    # Volatility (annualized)
+    daily_vol = np.std(daily_returns, ddof=1)
+    volatility = daily_vol * np.sqrt(periods_per_year)
+    result['volatility'] = volatility
+
+    # Sharpe Ratio
+    if volatility > 0.001:
+        sharpe = ann_return / volatility
+    else:
+        sharpe = 0.0
+    sharpe = np.clip(sharpe, -10, 10)
+    result['sharpe'] = sharpe
+
+    # Sortino Ratio (downside deviation)
+    negative_returns = daily_returns[daily_returns < 0]
+    if len(negative_returns) >= 2:
+        downside_vol = np.std(negative_returns, ddof=1) * np.sqrt(periods_per_year)
+        if downside_vol > 0.001:
+            sortino = ann_return / downside_vol
+        else:
+            sortino = 0
+    else:
+        sortino = 0
+    sortino = np.clip(sortino, -20, 20)
+    result['sortino'] = sortino
+
+    # Maximum Drawdown
+    running_max = np.maximum.accumulate(values)
+    drawdowns = (values - running_max) / running_max
+    max_dd = np.min(drawdowns)
+    result['max_dd'] = max_dd
+
+    # Calmar Ratio (annualized return / max drawdown)
+    if max_dd < -0.001:  # At least 0.1% drawdown
+        calmar = ann_return / abs(max_dd)
+    else:
+        calmar = 0
+    calmar = np.clip(calmar, -20, 20)
+    result['calmar'] = calmar
+
+    # Win Rate
+    win_rate = np.mean(daily_returns > 0)
+    result['win_rate'] = win_rate
+
+    return result
+
+
 def run_dynamic_strategy_selection_headless(historical_data, all_strategies, selected_style,
                                             trigger_df=None, trigger_config=None, callback=None):
-    """Headless version of _run_dynamic_strategy_selection."""
+    """
+    Headless version of _run_dynamic_strategy_selection.
+    Matches Pragyam app.py trigger-based backtest logic exactly.
+    """
     is_sip = "SIP" in selected_style
     metric_key = 'calmar' if is_sip else 'sortino'
 
     if trigger_config is None:
-        trigger_config = TRIGGER_CONFIG.get(selected_style, TRIGGER_CONFIG['SIP Investment'])
+        trigger_config = TRIGGER_CONFIG.get(selected_style, TRIGGER_CONFIG.get('SIP Investment', {}))
 
-    buy_threshold = trigger_config.get('buy_threshold', 0.42)
-    sell_threshold = trigger_config.get('sell_threshold', 0.50)
+    buy_threshold = trigger_config.get('buy_threshold', 0.42 if is_sip else 0.52)
+    sell_threshold = trigger_config.get('sell_threshold', 1.5 if is_sip else 1.2)
     sell_enabled = trigger_config.get('sell_enabled', not is_sip)
 
     if not historical_data or len(historical_data) < 10:
@@ -687,88 +786,192 @@ def run_dynamic_strategy_selection_headless(historical_data, all_strategies, sel
     capital = 10_000_000
 
     # Build trigger masks
-    buy_mask = [False] * n_days
-    sell_mask = [False] * n_days
+    buy_dates_mask = [False] * n_days
+    sell_dates_mask = [False] * n_days
     if trigger_df is not None and not trigger_df.empty and 'REL_BREADTH' in trigger_df.columns:
         if hasattr(trigger_df.index, 'date'):
-            tmap = {idx.date(): val for idx, val in trigger_df['REL_BREADTH'].items() if pd.notna(val)}
+            trigger_date_map = {idx.date(): val for idx, val in trigger_df['REL_BREADTH'].items() if pd.notna(val)}
         else:
-            tmap = {pd.to_datetime(idx).date(): val for idx, val in trigger_df['REL_BREADTH'].items() if pd.notna(val)}
-        for i, sd in enumerate(simulation_dates):
-            if sd in tmap:
-                if tmap[sd] < buy_threshold: buy_mask[i] = True
-                if sell_enabled and tmap[sd] > sell_threshold: sell_mask[i] = True
+            trigger_date_map = {pd.to_datetime(idx).date(): val for idx, val in trigger_df['REL_BREADTH'].items() if pd.notna(val)}
+        for i, sim_date in enumerate(simulation_dates):
+            if sim_date in trigger_date_map:
+                rel_breadth = trigger_date_map[sim_date]
+                if rel_breadth < buy_threshold:
+                    buy_dates_mask[i] = True
+                if sell_enabled and rel_breadth > sell_threshold:
+                    sell_dates_mask[i] = True
     else:
-        buy_mask[0] = True
+        buy_dates_mask[0] = True
 
     results = {}
+    valid_strategies = []
     total = len(all_strategies)
+
     for idx, (name, strategy) in enumerate(all_strategies.items()):
         if callback:
             callback(f"Backtesting: {name} ({idx+1}/{total})", 0.25 + (idx/total) * 0.35)
+
         try:
+            daily_values = []
+            portfolio_units = {}
+            buy_signal_active = False
+            trade_log = []
+
             if is_sip:
-                nav = 1.0
-                prev_val = 0.0
-                units = {}
-                for j, sd in enumerate(simulation_dates):
-                    df = date_to_df[sd]
-                    prices = df.set_index('symbol')['price']
-                    cur_val = sum(u * prices.get(s, 0) for s, u in units.items()) if units else 0.0
-                    if prev_val > 0:
-                        pnl_ratio = cur_val / prev_val if prev_val > 0 else 1.0
-                        nav *= pnl_ratio
-                    if buy_mask[j]:
-                        port = strategy.generate_portfolio(df.copy(), capital)
-                        if not port.empty:
-                            for _, r in port.iterrows():
-                                s, u = r['symbol'], r['units']
-                                units[s] = units.get(s, 0) + u
-                    cur_val = sum(u * prices.get(s, 0) for s, u in units.items()) if units else 0.0
-                    prev_val = cur_val if cur_val > 0 else prev_val
-                nav_series = nav
-                total_ret = nav - 1.0
-                years = n_days / 252
-                ann_ret = (nav ** (1/years) - 1) if years > 0 else 0
-                results[name] = {
-                    'total_return': total_ret, 'annual_return': ann_ret,
-                    'sharpe': ann_ret / 0.15 if ann_ret != 0 else 0,
-                    'sortino': ann_ret / 0.10 if ann_ret != 0 else 0,
-                    'calmar': ann_ret / 0.15 if ann_ret != 0 else 0,
-                }
+                # ── SIP MODE: Accumulate on each buy trigger, track TWR ──
+                nav_index = 1.0
+                prev_portfolio_value = 0.0
+                has_position = False
+                sip_amount = capital
+
+                for j, sim_date in enumerate(simulation_dates):
+                    df = date_to_df[sim_date]
+                    prices_today = df.set_index('symbol')['price']
+
+                    # Step 1: Compute current value of EXISTING holdings
+                    current_value = 0.0
+                    if portfolio_units:
+                        current_value = sum(
+                            units * prices_today.get(sym, 0)
+                            for sym, units in portfolio_units.items()
+                        )
+
+                    # Step 2: Update NAV based on market movement BEFORE any new investment
+                    if has_position and prev_portfolio_value > 0:
+                        day_return = (current_value - prev_portfolio_value) / prev_portfolio_value
+                        nav_index *= (1 + day_return)
+
+                    # Step 3: Check buy/sell triggers
+                    is_buy_day = buy_dates_mask[j]
+                    actual_buy_trigger = is_buy_day and not buy_signal_active
+
+                    if is_buy_day:
+                        buy_signal_active = True
+                    else:
+                        buy_signal_active = False
+
+                    # Sell (SIP rarely sells, but support it)
+                    if sell_dates_mask[j] and portfolio_units and sell_enabled:
+                        trade_log.append({'Event': 'SELL', 'Date': sim_date})
+                        portfolio_units = {}
+                        has_position = False
+                        current_value = 0.0
+
+                    # Step 4: Execute SIP buy (does NOT affect nav_index — TWR principle)
+                    if actual_buy_trigger:
+                        trade_log.append({'Event': 'BUY', 'Date': sim_date})
+                        buy_portfolio = strategy.generate_portfolio(df.copy(), sip_amount)
+
+                        if buy_portfolio is not None and not buy_portfolio.empty and 'value' in buy_portfolio.columns:
+                            for _, row in buy_portfolio.iterrows():
+                                sym = row['symbol']
+                                u = row.get('units', 0)
+                                if u > 0:
+                                    portfolio_units[sym] = portfolio_units.get(sym, 0) + u
+                            has_position = True
+
+                            # Recalculate value after addition for next day's return base
+                            current_value = sum(
+                                units * prices_today.get(sym, 0)
+                                for sym, units in portfolio_units.items()
+                            )
+
+                    prev_portfolio_value = current_value
+                    daily_values.append(nav_index)
+
             else:
-                cur_capital = capital
-                units = {}
-                for j, sd in enumerate(simulation_dates):
-                    df = date_to_df[sd]
-                    prices = df.set_index('symbol')['price']
-                    if sell_mask[j] and units:
-                        sell_val = sum(u * prices.get(s, 0) for s, u in units.items())
-                        cur_capital += sell_val
-                        units = {}
-                    if buy_mask[j] and not units and cur_capital > 1000:
-                        port = strategy.generate_portfolio(df.copy(), cur_capital)
-                        if not port.empty:
-                            for _, r in port.iterrows():
-                                units[r['symbol']] = units.get(r['symbol'], 0) + r['units']
-                            cur_capital -= port['value'].sum()
-                final_val = cur_capital + sum(u * date_to_df[simulation_dates[-1]].set_index('symbol')['price'].get(s, 0) for s, u in units.items())
-                total_ret = (final_val / capital) - 1
-                years = n_days / 252
-                ann_ret = ((final_val / capital) ** (1/years) - 1) if years > 0 else 0
-                results[name] = {
-                    'total_return': total_ret, 'annual_return': ann_ret,
-                    'sharpe': ann_ret / 0.15 if ann_ret != 0 else 0,
-                    'sortino': ann_ret / 0.10 if ann_ret != 0 else 0,
-                    'calmar': ann_ret / 0.15 if ann_ret != 0 else 0,
-                }
+                # ── SWING MODE: Single position, hold until sell trigger ──
+                current_capital = capital
+
+                for j, sim_date in enumerate(simulation_dates):
+                    df = date_to_df[sim_date]
+
+                    is_buy_day = buy_dates_mask[j]
+                    actual_buy_trigger = is_buy_day and not buy_signal_active
+
+                    if is_buy_day:
+                        buy_signal_active = True
+                    else:
+                        buy_signal_active = False
+
+                    # Check sell trigger
+                    if sell_dates_mask[j] and portfolio_units:
+                        trade_log.append({'Event': 'SELL', 'Date': sim_date})
+                        prices_today = df.set_index('symbol')['price']
+                        sell_value = sum(
+                            units * prices_today.get(sym, 0)
+                            for sym, units in portfolio_units.items()
+                        )
+                        current_capital += sell_value
+                        portfolio_units = {}
+                        buy_signal_active = False
+
+                    # Execute buy (only if no position)
+                    if actual_buy_trigger and not portfolio_units and current_capital > 1000:
+                        trade_log.append({'Event': 'BUY', 'Date': sim_date})
+                        buy_portfolio = strategy.generate_portfolio(df.copy(), current_capital)
+
+                        if buy_portfolio is not None and not buy_portfolio.empty and 'units' in buy_portfolio.columns:
+                            portfolio_units = pd.Series(
+                                buy_portfolio['units'].values,
+                                index=buy_portfolio['symbol']
+                            ).to_dict()
+                            current_capital -= buy_portfolio['value'].sum()
+
+                    # Calculate current value
+                    portfolio_value = 0
+                    if portfolio_units:
+                        prices_today = df.set_index('symbol')['price']
+                        portfolio_value = sum(
+                            units * prices_today.get(sym, 0)
+                            for sym, units in portfolio_units.items()
+                        )
+
+                    daily_values.append(portfolio_value + current_capital)
+
+            # ── COMPUTE METRICS ──
+            if len(daily_values) < 10 or daily_values[0] <= 0:
+                logger.debug(f"  {name}: Invalid daily values - SKIP")
+                results[name] = {'status': 'skip', 'reason': 'Invalid values'}
+                continue
+
+            metrics = _compute_backtest_metrics(daily_values)
+
+            score = metrics[metric_key]
+
+            # Add trade info
+            metrics['buy_events'] = len([t for t in trade_log if t['Event'] == 'BUY'])
+            metrics['sell_events'] = len([t for t in trade_log if t['Event'] == 'SELL'])
+            metrics['trade_events'] = len(trade_log)
+
+            # Validate score
+            if not np.isfinite(score):
+                logger.debug(f"  {name}: Invalid {metric_key} ({score}) - SKIP")
+                results[name] = {'status': 'skip', 'reason': f'Invalid {metric_key}'}
+                continue
+
+            # Store results
+            results[name] = {
+                'status': 'ok',
+                'metrics': metrics,
+                'score': score,
+                'positions': len(portfolio_units) if portfolio_units else 0,
+                'trade_log': trade_log
+            }
+            valid_strategies.append((name, score, metrics))
+
         except Exception as e:
             logger.error(f"Strategy backtest error ({name}): {e}")
-            results[name] = {'total_return': 0, 'sharpe': 0, 'sortino': 0, 'calmar': 0}
+            results[name] = {'status': 'error', 'reason': str(e)}
+            continue
 
     # Select top 4
-    sorted_strats = sorted(results.items(), key=lambda x: x[1].get(metric_key, 0), reverse=True)
-    top4 = [s[0] for s in sorted_strats[:4]]
+    if len(valid_strategies) < 4:
+        logger.warning(f"Only {len(valid_strategies)} valid strategies (need 4) - using static selection")
+        return None, results
+
+    valid_strategies.sort(key=lambda x: x[1], reverse=True)
+    top4 = [name for name, _, _ in valid_strategies[:4]]
     logger.info(f"Dynamic selection: Top 4 by {metric_key}: {top4}")
     return top4, results
 
