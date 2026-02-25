@@ -360,7 +360,12 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ═══════════════════════════════════════
 
 def main():
-    """Build and run the Telegram bot. Called from app.py (thread) or standalone."""
+    """Build and run the Telegram bot.
+    
+    Works both as main thread (python bot.py) and daemon thread (from app.py).
+    Uses manual async loop instead of run_polling() to avoid signal handler issues
+    when running inside a non-main thread (Streamlit Cloud).
+    """
     # Ensure DB tables exist
     init_db()
 
@@ -394,7 +399,53 @@ def main():
     app.add_handler(conv_handler)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, fallback_handler))
 
-    app.run_polling(drop_pending_updates=True)
+    # ─── Run polling manually (thread-safe, no signal handlers) ───
+    # app.run_polling() is a convenience wrapper that calls signal.signal()
+    # internally — which crashes when running in a non-main thread.
+    # Instead, we build our own async loop.
+
+    import threading
+    if threading.current_thread() is threading.main_thread():
+        # Running standalone (python bot.py) — use the simple convenience method
+        app.run_polling(drop_pending_updates=True)
+    else:
+        # Running inside a thread (from app.py / Streamlit) — manual async loop
+        _run_polling_in_thread(app)
+
+
+def _run_polling_in_thread(app):
+    """Run the bot's polling loop in a non-main thread without signal handlers."""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    async def _run():
+        try:
+            await app.initialize()
+            await app.start()
+            await app.updater.start_polling(drop_pending_updates=True)
+            logger.info("PRAGYAM Bot is polling for updates...")
+
+            # Keep running until the thread is killed (daemon thread dies with process)
+            while True:
+                await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error(f"Bot polling error: {e}", exc_info=True)
+        finally:
+            try:
+                await app.updater.stop()
+                await app.stop()
+                await app.shutdown()
+            except Exception:
+                pass
+
+    try:
+        loop.run_until_complete(_run())
+    except (KeyboardInterrupt, SystemExit):
+        pass
+    finally:
+        loop.close()
 
 
 if __name__ == '__main__':
