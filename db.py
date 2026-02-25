@@ -89,8 +89,15 @@ def _get_conn() -> sqlite3.Connection:
     return _local.conn
 
 
+_db_initialized = False
+
+
 def init_db():
-    """Create tables if they don't exist. Safe to call multiple times."""
+    """Create tables if they don't exist. Safe to call multiple times — only runs once."""
+    global _db_initialized
+    if _db_initialized:
+        return
+
     conn = _get_conn()
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS users (
@@ -135,6 +142,7 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_logs_time ON bot_logs(timestamp);
     """)
     conn.commit()
+    _db_initialized = True
     logger.info(f"Database ready at: {DB_PATH}")
 
 

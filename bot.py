@@ -71,8 +71,31 @@ if not TOKEN:
     raise ValueError("CRITICAL: TELEGRAM_BOT_TOKEN environment variable is not set.")
 
 # ─── Engine Thread Pool ───
-# Dedicated pool for heavy portfolio generation — 10 concurrent users max
-ENGINE_POOL = ThreadPoolExecutor(max_workers=10, thread_name_prefix="pragyam-engine")
+# Dedicated pool for heavy portfolio generation
+MAX_ENGINE_WORKERS = 10
+ENGINE_POOL = ThreadPoolExecutor(max_workers=MAX_ENGINE_WORKERS, thread_name_prefix="pragyam-engine")
+
+# Track active engine jobs for capacity reporting
+import threading as _threading
+_active_jobs = _threading.Semaphore(MAX_ENGINE_WORKERS)
+
+
+def _engine_has_capacity() -> bool:
+    """Check if the engine pool can accept another job right now."""
+    # Try acquiring without blocking — if we can, release immediately and return True
+    acquired = _active_jobs.acquire(blocking=False)
+    if acquired:
+        _active_jobs.release()
+        return True
+    return False
+
+
+def _get_queue_depth() -> int:
+    """Approximate number of jobs waiting in the queue."""
+    try:
+        return ENGINE_POOL._work_queue.qsize()
+    except Exception:
+        return 0
 
 # Conversation states
 SELECT_STYLE, ENTER_CAPITAL, CONFIRM = range(3)
@@ -279,18 +302,32 @@ async def confirm_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     add_log("INFO", "engine", f"Portfolio requested: {style} ₹{capital:,.0f}", user.id)
     start_time = time.time()
 
-    # Send processing message
-    status_msg = await query.edit_message_text(PROCESSING_MSG, parse_mode=ParseMode.HTML)
-
-    # Run engine in dedicated thread pool — allows multiple users to generate simultaneously
-    try:
-        from engine import run_pragyam_pipeline
-        loop = asyncio.get_event_loop()
-
-        portfolio_df, metadata = await loop.run_in_executor(
-            ENGINE_POOL,
-            lambda: run_pragyam_pipeline(style, capital, callback=lambda msg, pct: None)
+    # ─── Capacity check ───
+    queue_depth = _get_queue_depth()
+    if not _engine_has_capacity() or queue_depth > 0:
+        queue_msg = (
+            f"⏳ <b>Curating your portfolio...</b>\n\n"
+            f"The engine is busy with other requests. "
+            f"<b>Queue position: ~{queue_depth + 1}</b>\n\n"
+            f"<i>Your portfolio will be generated as soon as a slot opens. "
+            f"This may take 10-15 minutes. You'll be notified here.</i>"
         )
+        status_msg = await query.edit_message_text(queue_msg, parse_mode=ParseMode.HTML)
+    else:
+        status_msg = await query.edit_message_text(PROCESSING_MSG, parse_mode=ParseMode.HTML)
+
+    # Run engine in dedicated thread pool — wrapped in semaphore for tracking
+    def _run_engine():
+        _active_jobs.acquire()
+        try:
+            from engine import run_pragyam_pipeline
+            return run_pragyam_pipeline(style, capital, callback=lambda msg, pct: None)
+        finally:
+            _active_jobs.release()
+
+    try:
+        loop = asyncio.get_event_loop()
+        portfolio_df, metadata = await loop.run_in_executor(ENGINE_POOL, _run_engine)
 
         duration = time.time() - start_time
 
