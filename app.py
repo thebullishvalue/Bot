@@ -1,77 +1,150 @@
-import subprocess
-import sys
-import os
-import multiprocessing
-import logging
-import time
-import fcntl  # For file locking
+"""
+PRAGYAM — Single Entry Point
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Hemrek Capital Portfolio Intelligence Distribution System
 
-# Setup logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+Works in TWO modes automatically:
+
+  1. Streamlit Cloud / `streamlit run app.py`
+     → Bot starts as a daemon thread
+     → Dashboard renders directly (we're already inside Streamlit)
+
+  2. Local / `python app.py`
+     → Bot starts as a daemon thread
+     → Launches `streamlit run dashboard.py` as a subprocess
+"""
+
+import os
+import sys
+import threading
+import logging
+
+# ─── Paths ───
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+os.chdir(SCRIPT_DIR)
+sys.path.insert(0, SCRIPT_DIR)
+
+# ─── Logging ───
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s | %(levelname)-7s | %(name)s | %(message)s'
+)
 logger = logging.getLogger("pragyam.launcher")
 
-LOCK_FILE = "bot.lock"  # Lock file to prevent duplicates
+for name in ['httpx', 'httpcore', 'telegram.ext', 'urllib3', 'yfinance']:
+    logging.getLogger(name).setLevel(logging.WARNING)
 
-def acquire_lock():
-    """Acquire a file lock to prevent multiple bot instances."""
-    if os.path.exists(LOCK_FILE):
-        logger.warning("Lock file exists—checking if active.")
+
+# ─── Detect Streamlit ───
+def _inside_streamlit() -> bool:
+    """Check if we're being executed by Streamlit's script runner."""
+    try:
+        from streamlit.runtime.scriptrunner import get_script_run_ctx
+        return get_script_run_ctx() is not None
+    except Exception:
+        return False
+
+
+# ─── Initialize Database ───
+from db import init_db
+init_db()
+
+
+# ─── Bot Thread (starts ONCE per Python process) ───
+# CRITICAL: Streamlit re-executes this script on every user interaction,
+# so module-level variables here get reset. We store the flag on an imported
+# module (db) because Python caches imported modules — their attributes persist.
+import db as _db_module
+
+
+def _ensure_bot_running():
+    """Start the Telegram bot thread exactly once per process lifetime."""
+    if getattr(_db_module, '_bot_thread_started', False):
+        return  # Already running from a previous Streamlit rerun
+
+    # Use a lock in case of race conditions during first render
+    _lock = getattr(_db_module, '_bot_lock', None)
+    if _lock is None:
+        _db_module._bot_lock = threading.Lock()
+        _lock = _db_module._bot_lock
+
+    with _lock:
+        if getattr(_db_module, '_bot_thread_started', False):
+            return
         try:
-            with open(LOCK_FILE, 'r') as f:
-                pid = int(f.read().strip())
-                os.kill(pid, 0)  # Check if PID is alive
-                return None  # Active, skip
-        except (ValueError, OSError):
-            logger.info("Stale lock file—removing.")
-            os.remove(LOCK_FILE)
-    
-    lock_fd = open(LOCK_FILE, 'w')
-    try:
-        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        lock_fd.write(str(os.getpid()))  # Write current PID
-        lock_fd.flush()
-        return lock_fd
-    except IOError:
-        return None
+            from bot import main as bot_main
+            t = threading.Thread(target=bot_main, name="telegram-bot", daemon=True)
+            t.start()
+            _db_module._bot_thread_started = True
+            logger.info("━━ Telegram Bot thread started ━━")
 
-def start_bot():
-    """Start the Telegram bot in a separate process."""
-    try:
-        from bot import main as bot_main  # Import the bot's main function
-        logger.info("Starting Telegram Bot...")
-        bot_main()  # This runs the bot's polling loop
-    except ImportError as e:
-        logger.error(f"Failed to import bot.py: {e}")
-    except Exception as e:
-        logger.error(f"Bot failed: {e}")  # Log but don't exit
+            # Write PID so dashboard sidebar can show bot status
+            try:
+                with open(os.path.join(SCRIPT_DIR, "bot.pid"), 'w') as f:
+                    f.write(str(os.getpid()))
+            except OSError:
+                pass
+        except Exception as e:
+            logger.error(f"Bot failed to start: {e}", exc_info=True)
 
-def start_dashboard():
-    """Start the Streamlit dashboard."""
-    try:
-        logger.info("Starting Admin Dashboard...")
-        # Run Streamlit via subprocess (mimics 'streamlit run') without port/address
-        subprocess.run([
+
+# Start bot (guarded — only once per process)
+_ensure_bot_running()
+
+
+# ─── Route to correct mode ───
+if _inside_streamlit():
+    # MODE 1: Streamlit Cloud / `streamlit run app.py`
+    # We're already inside Streamlit — render the dashboard directly
+    # by executing dashboard.py in this script's context.
+    _dashboard_path = os.path.join(SCRIPT_DIR, "dashboard.py")
+    with open(_dashboard_path) as _f:
+        exec(compile(_f.read(), _dashboard_path, "exec"))
+
+else:
+    # MODE 2: Local dev / `python app.py`
+    # Launch Streamlit as a subprocess (foreground, blocks until exit)
+    if __name__ == "__main__":
+        import subprocess
+        import signal
+        import time
+        import atexit
+
+        PID_FILE = os.path.join(SCRIPT_DIR, "bot.pid")
+        LOCK_FILE = os.path.join(SCRIPT_DIR, "bot.lock")
+
+        def _cleanup():
+            for f in [PID_FILE, LOCK_FILE]:
+                try:
+                    if os.path.exists(f):
+                        os.remove(f)
+                except OSError:
+                    pass
+
+        atexit.register(_cleanup)
+
+        def _signal_handler(sig, frame):
+            logger.info("Shutdown signal received")
+            _cleanup()
+            sys.exit(0)
+
+        signal.signal(signal.SIGINT, _signal_handler)
+        signal.signal(signal.SIGTERM, _signal_handler)
+
+        logger.info("━━ Admin Dashboard starting (subprocess) ━━")
+        time.sleep(2)  # Let bot initialize
+
+        cmd = [
             sys.executable, "-m", "streamlit", "run", "dashboard.py",
-            "--theme.base", "dark"
-        ], check=False)  # Don't raise on error
-    except Exception as e:
-        logger.error(f"Unexpected error starting dashboard: {e}")
-
-if __name__ == "__main__":
-    lock_fd = acquire_lock()
-    if lock_fd is None:
-        logger.warning("Bot lock already acquired—skipping bot start to avoid duplicates.")
-    else:
-        # Start bot in a separate process only if lock acquired
-        bot_process = multiprocessing.Process(target=start_bot)
-        bot_process.start()
-        
-        # Give bot a moment to initialize
-        time.sleep(2)
-    
-    # Start dashboard in the main process (always, even if bot skips/fails)
-    start_dashboard()
-    
-    # Clean up lock on exit
-    if lock_fd:
-        os.remove(LOCK_FILE)
+            "--theme.base", "dark",
+            "--server.headless", "true",
+            "--server.address", "0.0.0.0",
+            "--server.port", os.environ.get("PORT", "8501"),
+            "--browser.gatherUsageStats", "false",
+        ]
+        try:
+            subprocess.run(cmd, check=False, cwd=SCRIPT_DIR)
+        except KeyboardInterrupt:
+            logger.info("Stopped by user")
+        finally:
+            _cleanup()
