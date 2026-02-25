@@ -469,34 +469,68 @@ def main():
 def _run_in_thread():
     """Run the bot polling loop in a non-main thread.
     
-    Key details:
-        • Creates its own event loop (threads don't have one by default)
-        • Calls delete_webhook() FIRST to kill any lingering previous session
-          and prevent the "Conflict: terminated by other getUpdates" error
-        • No signal handlers (they're main-thread-only in Python)
+    Handles the "Conflict: terminated by other getUpdates" error that occurs
+    on redeploy by claiming the getUpdates session explicitly before starting
+    PTB's polling loop. This ensures we never hand off a broken session to PTB.
     """
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
     app = _build_app()
 
+    async def _claim_session():
+        """Claim the Telegram getUpdates session, retrying until the old instance disconnects."""
+        MAX_ATTEMPTS = 8
+        for attempt in range(1, MAX_ATTEMPTS + 1):
+            try:
+                # delete_webhook clears any webhook AND signals Telegram to drop old sessions
+                await app.bot.delete_webhook(drop_pending_updates=True)
+
+                # This is the key call: a short getUpdates with timeout=1 "claims" the
+                # polling session. If an old instance is still connected, this throws Conflict.
+                await app.bot.get_updates(offset=-1, timeout=1)
+
+                logger.info(f"Session claimed successfully (attempt {attempt})")
+                return True
+
+            except Exception as e:
+                if "Conflict" in str(e):
+                    delay = min(5 * attempt, 30)
+                    logger.warning(
+                        f"Old instance still connected (attempt {attempt}/{MAX_ATTEMPTS}). "
+                        f"Waiting {delay}s..."
+                    )
+                    await asyncio.sleep(delay)
+                else:
+                    # Non-conflict error (network issue, etc.) — log and retry
+                    logger.warning(f"Session claim attempt {attempt} failed: {e}")
+                    await asyncio.sleep(3)
+
+        logger.error(f"Could not claim session after {MAX_ATTEMPTS} attempts")
+        return False
+
     async def _run():
         try:
             await app.initialize()
 
-            # ─── Force takeover: kill any previous polling session ───
-            # Without this, redeploying on Render/Streamlit Cloud causes
-            # "Conflict: terminated by other getUpdates request" because
-            # the old process might still be polling for a few seconds.
-            await app.bot.delete_webhook(drop_pending_updates=True)
-            logger.info("Cleared previous webhook/polling session")
+            # Verify token and log bot identity
+            me = await app.bot.get_me()
+            logger.info(f"Bot identity: @{me.username} (id: {me.id})")
 
+            # ─── Claim the getUpdates session before handing off to PTB ───
+            session_ok = await _claim_session()
+            if not session_ok:
+                logger.error("Cannot start bot — another instance may still be running")
+                return
+
+            # ─── Now start PTB polling (session is ours, no Conflict expected) ───
             await app.start()
             await app.updater.start_polling(
                 drop_pending_updates=True,
                 allowed_updates=Update.ALL_TYPES,
+                poll_interval=0.5,
             )
-            logger.info("PRAGYAM Bot is polling for updates...")
+            logger.info("PRAGYAM Bot is polling for updates ✓")
 
             # Keep alive until daemon thread is killed with the process
             while True:
