@@ -159,6 +159,11 @@ def get_all_strategies() -> Dict[str, BaseStrategy]:
 
 # ─── Market Regime Detection (from app.py) ───
 class MarketRegimeDetectorV2:
+    """
+    Institutional-grade market regime detection (v2) with corrected scoring and
+    classification logic.
+    """
+    
     def __init__(self):
         self.regime_thresholds = {
             'CRISIS': {'score': -1.0, 'confidence': 0.85},
@@ -169,10 +174,10 @@ class MarketRegimeDetectorV2:
             'BULL': {'score': 1.0, 'confidence': 0.75},
             'STRONG_BULL': {'score': 1.5, 'confidence': 0.85},
         }
-
+    
     def detect_regime(self, historical_data: list) -> Tuple[str, str, float, Dict]:
         if len(historical_data) < 10:
-            return "INSUFFICIENT_DATA", "Bull Market Mix", 0.3, {}
+            return "INSUFFICIENT_DATA", "🐂 Bull Market Mix", 0.3, {}
         
         analysis_window = historical_data[-10:]
         latest_date, latest_df = analysis_window[-1]
@@ -298,30 +303,45 @@ class MarketRegimeDetectorV2:
         return {'type': extreme_type, 'score': score, 'zscore_extreme_oversold_pct': extreme_oversold, 'zscore_extreme_overbought_pct': extreme_overbought}
 
     def _analyze_correlation_regime(self, df: pd.DataFrame) -> Dict:
+        """
+        Analyze cross-sectional correlation structure.
+        
+        High correlation (herding) often precedes market stress.
+        Low correlation indicates stock-picking environment.
+        
+        Mathematical approach: Compute pairwise correlation proxy via 
+        indicator agreement across the cross-section.
+        """
+        # Cross-sectional correlation proxy via indicator agreement
+        # When indicators agree across stocks, correlation is high
         rsi_median = df['rsi latest'].median()
         osc_median = df['osc latest'].median()
         
+        # Fraction of stocks on same side of median (herding measure)
         rsi_above = (df['rsi latest'] > rsi_median).mean()
-        rsi_agreement = max(rsi_above, 1 - rsi_above) 
+        rsi_agreement = max(rsi_above, 1 - rsi_above)  # Closer to 1 = more agreement
         
         osc_above = (df['osc latest'] > osc_median).mean()
         osc_agreement = max(osc_above, 1 - osc_above)
         
+        # Cross-indicator agreement (both oversold or both overbought)
         both_oversold = ((df['rsi latest'] < 40) & (df['osc latest'] < -30)).mean()
         both_overbought = ((df['rsi latest'] > 60) & (df['osc latest'] > 30)).mean()
         indicator_agreement = both_oversold + both_overbought
         
-        rsi_dispersion = df['rsi latest'].std() / 50 
+        # Dispersion as inverse correlation proxy
+        rsi_dispersion = df['rsi latest'].std() / 50  # Normalized
         osc_dispersion = df['osc latest'].std() / 100
         avg_dispersion = (rsi_dispersion + osc_dispersion) / 2
         
+        # Combined correlation score (0 = dispersed, 1 = correlated)
         correlation_score = (rsi_agreement + osc_agreement) / 2 * (1 - avg_dispersion) + indicator_agreement * 0.3
         correlation_score = np.clip(correlation_score, 0, 1)
         
         if correlation_score > 0.7:
-            regime, score = 'HIGH_CORRELATION', -0.5 
+            regime, score = 'HIGH_CORRELATION', -0.5  # High corr often precedes stress
         elif correlation_score < 0.4:
-            regime, score = 'LOW_CORRELATION', 0.5 
+            regime, score = 'LOW_CORRELATION', 0.5  # Good for stock picking
         else:
             regime, score = 'NORMAL', 0.0
             
@@ -334,18 +354,31 @@ class MarketRegimeDetectorV2:
         }
 
     def _analyze_velocity(self, window: list) -> Dict:
+        """
+        Analyze momentum velocity and acceleration.
+        
+        Velocity: First derivative of RSI (rate of change)
+        Acceleration: Second derivative (rate of change of velocity)
+        
+        Positive acceleration with positive velocity = strengthening momentum
+        Negative acceleration with positive velocity = momentum fading
+        """
         if len(window) < 5: 
             return {'acceleration': 'UNKNOWN', 'score': 0.0, 'avg_velocity': 0.0, 'acceleration_value': 0.0}
         
         recent_rsis = np.array([w[1]['rsi latest'].mean() for w in window[-5:]])
-        velocity = np.diff(recent_rsis) 
+        
+        # Velocity: First differences (first derivative)
+        velocity = np.diff(recent_rsis)  # 4 values
         avg_velocity = np.mean(velocity)
         current_velocity = velocity[-1]
         
-        acceleration_values = np.diff(velocity)
+        # Acceleration: Second differences (second derivative)
+        acceleration_values = np.diff(velocity)  # 3 values
         avg_acceleration = np.mean(acceleration_values)
         current_acceleration = acceleration_values[-1]
         
+        # Classification based on velocity and acceleration
         if avg_velocity > 1.5 and current_acceleration > 0:
             velocity_regime, score = 'ACCELERATING_UP', 1.5
         elif avg_velocity > 1.0 and current_acceleration >= 0:
@@ -359,6 +392,7 @@ class MarketRegimeDetectorV2:
         elif avg_velocity < -0.5:
             velocity_regime, score = 'FALLING', -0.5
         elif abs(avg_velocity) < 0.5 and abs(current_acceleration) > 0.5:
+            # Momentum building from stable base
             if current_acceleration > 0:
                 velocity_regime, score = 'COILING_UP', 0.3
             else:
