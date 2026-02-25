@@ -40,15 +40,8 @@ sys.path.insert(0, SCRIPT_DIR)
 os.chdir(SCRIPT_DIR)
 
 # ─── Configure Logging ───
-log_format = '%(asctime)s | %(levelname)-7s | %(name)s | %(message)s'
-logging.basicConfig(
-    level=logging.INFO,
-    format=log_format,
-    handlers=[
-        logging.FileHandler(os.path.join(SCRIPT_DIR, "bot.log")),
-        logging.StreamHandler(sys.stdout)
-    ]
-)
+# NOTE: logging is configured centrally in app.py (with FileHandler + StreamHandler).
+# bot.py only creates its own named logger — no basicConfig call here.
 logger = logging.getLogger("pragyam.bot")
 
 for name in ['httpx', 'httpcore', 'telegram.ext', 'urllib3', 'yfinance']:
