@@ -468,22 +468,23 @@ def _run_in_thread():
 
     async def _claim_session():
         """Claim the Telegram getUpdates session, retrying until the old instance disconnects."""
-        MAX_ATTEMPTS = 8
+        MAX_ATTEMPTS = 12
         for attempt in range(1, MAX_ATTEMPTS + 1):
             try:
                 # delete_webhook clears any webhook AND signals Telegram to drop old sessions
                 await app.bot.delete_webhook(drop_pending_updates=True)
 
-                # This is the key call: a short getUpdates with timeout=1 "claims" the
-                # polling session. If an old instance is still connected, this throws Conflict.
-                await app.bot.get_updates(offset=-1, timeout=1)
+                # Multiple rapid getUpdates calls to firmly claim the session
+                for _ in range(3):
+                    await app.bot.get_updates(offset=-1, timeout=1)
+                    await asyncio.sleep(0.5)
 
                 logger.info(f"Session claimed successfully (attempt {attempt})")
                 return True
 
             except Exception as e:
                 if "Conflict" in str(e):
-                    delay = min(5 * attempt, 30)
+                    delay = min(8 * attempt, 60)
                     logger.warning(
                         f"Old instance still connected (attempt {attempt}/{MAX_ATTEMPTS}). "
                         f"Waiting {delay}s..."
@@ -492,7 +493,7 @@ def _run_in_thread():
                 else:
                     # Non-conflict error (network issue, etc.) — log and retry
                     logger.warning(f"Session claim attempt {attempt} failed: {e}")
-                    await asyncio.sleep(3)
+                    await asyncio.sleep(5)
 
         logger.error(f"Could not claim session after {MAX_ATTEMPTS} attempts")
         return False
@@ -511,14 +512,35 @@ def _run_in_thread():
                 logger.error("Cannot start bot — another instance may still be running")
                 return
 
-            # ─── Now start PTB polling (session is ours, no Conflict expected) ───
-            await app.start()
-            await app.updater.start_polling(
-                drop_pending_updates=True,
-                allowed_updates=Update.ALL_TYPES,
-                poll_interval=0.5,
-            )
-            logger.info("PRAGYAM Bot is polling for updates ✓")
+            # Extended delay to ensure Render's old instance fully disconnects from Telegram
+            # Render graceful shutdown can take several seconds
+            await asyncio.sleep(5)
+
+            # ─── Now start PTB polling with conflict retry ───
+            MAX_POLL_START_ATTEMPTS = 5
+            for poll_attempt in range(1, MAX_POLL_START_ATTEMPTS + 1):
+                try:
+                    await app.start()
+                    await app.updater.start_polling(
+                        drop_pending_updates=True,
+                        allowed_updates=Update.ALL_TYPES,
+                        poll_interval=0.5,
+                    )
+                    logger.info("PRAGYAM Bot is polling for updates ✓")
+                    break
+                except Exception as e:
+                    if "Conflict" in str(e) and poll_attempt < MAX_POLL_START_ATTEMPTS:
+                        wait = 10 * poll_attempt
+                        logger.warning(
+                            f"Polling start conflict (attempt {poll_attempt}/{MAX_POLL_START_ATTEMPTS}). "
+                            f"Waiting {wait}s before retry..."
+                        )
+                        await asyncio.sleep(wait)
+                        await app.shutdown()
+                        await asyncio.sleep(2)
+                        await app.initialize()
+                    else:
+                        raise
 
             # Keep alive until daemon thread is killed with the process
             while True:
