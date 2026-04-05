@@ -327,23 +327,18 @@ async def confirm_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if portfolio_df is not None and not portfolio_df.empty:
             metadata['capital'] = capital
 
-            regime = metadata.get('regime', {}).get('name', 'N/A')
-            sel_mode = metadata.get('phases', {}).get('selection', {}).get('mode', 'N/A')
-            strats = metadata.get('phases', {}).get('selection', {}).get('strategies', [])
             total_val = metadata.get('phases', {}).get('curation', {}).get('total_value', 0)
 
-            log_request_complete(request_id, len(portfolio_df), total_val, regime, sel_mode, strats, duration)
+            log_request_complete(request_id, len(portfolio_df), total_val)
 
             img_bytes = generate_portfolio_image(portfolio_df, metadata)
 
             summary = (
                 f"✅ <b>Portfolio Ready</b>\n\n"
                 f"<b>Style:</b> {style}\n"
-                f"<b>Regime:</b> {regime}\n"
                 f"<b>Capital:</b> ₹{capital:,.0f}\n"
                 f"<b>Invested:</b> ₹{total_val:,.0f}\n"
-                f"<b>Positions:</b> {len(portfolio_df)}\n"
-                f"<b>Duration:</b> {duration:.0f}s"
+                f"<b>Positions:</b> {len(portfolio_df)}"
             )
 
             await status_msg.delete()

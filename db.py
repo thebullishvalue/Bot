@@ -187,17 +187,15 @@ def log_request_start(user_id: int, investment_style: str, capital: float) -> in
         return 0
 
 
-def log_request_complete(request_id: int, positions: int, total_value: float, regime: str,
-                         selection_mode: str, strategies: list, duration: float):
+def log_request_complete(request_id: int, positions: int, total_value: float):
     """Mark a request as successfully completed."""
     if request_id == 0:
         return
     try:
         conn = _get_conn()
         conn.execute("""
-            UPDATE requests SET status='success', positions=?, total_value=?, regime=?,
-            selection_mode=?, strategies=?, duration_seconds=? WHERE id=?
-        """, (positions, total_value, regime, selection_mode, json.dumps(strategies), duration, request_id))
+            UPDATE requests SET status='success', positions=?, total_value=? WHERE id=?
+        """, (positions, total_value, request_id))
         conn.commit()
     except sqlite3.Error as e:
         logger.error(f"log_request_complete failed (id={request_id}): {e}")
