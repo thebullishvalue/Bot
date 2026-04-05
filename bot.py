@@ -139,8 +139,8 @@ Proceed?
 PROCESSING_MSG = """
 ⏳ <b>Curating your portfolio...</b>
 
-The engine is currently running walk-forward optimizations across 90+ strategies. 
-<i>This process takes 5-8 minutes.</i>
+The engine is running conviction-based analysis across 95+ strategies.
+<i>Each position is scored using RSI, Oscillator, Z-Score, and MA alignment signals.</i>
 
 You will receive a notification here once your portfolio is ready.
 """
@@ -384,8 +384,8 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "ℹ️ <b>How to Use</b>\n\n"
         "1. /start to begin\n"
         "2. Choose your style & capital\n"
-        "3. Wait 5-8 minutes for the engine to curate\n"
-        "4. Receive your strategy-optimized portfolio",
+        "3. Wait for the engine to curate your portfolio\n"
+        "4. Receive your conviction-optimized portfolio",
         parse_mode=ParseMode.HTML
     )
 

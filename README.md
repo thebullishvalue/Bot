@@ -58,7 +58,7 @@ This starts:
 Open your Telegram bot and send `/start`. Follow the flow:
 1. Select investment style (Swing Trading / SIP Investment)
 2. Choose or enter capital amount
-3. Confirm and wait 5-8 minutes for the engine
+3. Confirm and wait for the engine to curate your portfolio
 4. Receive your curated portfolio image
 
 ---
