@@ -19,13 +19,13 @@ app.py  ←  Single entry point (python app.py)
 - **`bot.py`** — Telegram bot with conversation flow: style selection → capital input → confirmation → engine run → portfolio image delivery.
 - **`dashboard.py`** — Streamlit admin dashboard with overview metrics, user management, request logs, terminal output, and analytics.
 - **`db.py`** — SQLite database with WAL mode for safe concurrent access. Auto-detects writable path (handles read-only mounts like Render).
-- **`engine.py`** — Headless 4-phase pipeline: data fetch → regime detection → strategy selection → walk-forward → curation.
+- **`engine.py`** — Headless 2-phase pipeline: data fetch + regime detection → conviction-based portfolio curation (ALL 95 strategies).
+- **`regime.py`** — 7-factor market regime detection with composite scoring.
+- **`portfolio.py`** — Conviction-based portfolio construction with style-aware dispersion weighting.
+- **`metrics.py`** — Production-grade execution metrics and phase tracking.
 - **`backdata.py`** — Market data download and indicator calculation via yfinance.
-- **`strategies.py`** — 90+ quantitative trading strategies.
-- **`backtest_engine.py`** — Unified walk-forward backtest engine.
-- **`strategy_selection.py`** — Dynamic strategy selection using market breadth data.
+- **`strategies.py`** — 95+ quantitative trading strategies.
 - **`portfolio_image.py`** — Generates clean portfolio table images via matplotlib.
-- **`charts.py`** — Chart generation utilities.
 
 ---
 
@@ -99,13 +99,13 @@ Bot/
 ├── bot.py                 # Telegram bot handlers
 ├── dashboard.py           # Streamlit admin dashboard
 ├── db.py                  # SQLite database layer
-├── engine.py              # Headless portfolio generation pipeline
+├── engine.py              # Headless portfolio generation pipeline (2-phase)
+├── regime.py              # 7-factor market regime detection
+├── portfolio.py           # Conviction-based portfolio construction
+├── metrics.py             # Execution metrics and phase tracking
 ├── backdata.py            # Market data & indicators
-├── strategies.py          # Trading strategies library
-├── backtest_engine.py     # Walk-forward backtest engine
-├── strategy_selection.py  # Dynamic strategy selection
+├── strategies.py          # Trading strategies library (95+)
 ├── portfolio_image.py     # Portfolio image generator
-├── charts.py              # Chart utilities
 ├── symbols.txt            # ETF/stock universe (30 symbols)
 ├── requirements.txt       # Python dependencies
 ├── run.sh                 # Shell launcher
@@ -130,6 +130,7 @@ Bot/
 
 ## Version History
 
+- **v5.0.0** — Engine refactored to match Pragyam 7.0.5: 2-phase conviction-based pipeline (ALL 95 strategies), 7-factor regime detection, style-aware dispersion weighting, execution metrics, dead code/file removal
 - **v4.0.0** — Architecture rewrite: single entry point, thread-based bot, WAL mode DB, auto-writable path detection, error handler, clean client handover
 - **v3.2.0** — Dashboard improvements, bot control panel
 - **v3.0.0** — Initial Telegram bot + dashboard integration
