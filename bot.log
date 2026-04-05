@@ -1,9 +1,0 @@
-2026-04-05 18:04:20,148 | INFO    | pragyam.launcher | Log file: /Users/manthan/Documents/Ventures/Hemrek Capital/Repository/Bot/Bot-main/bot.log
-2026-04-05 18:04:20,356 | INFO    | pragyam.db | Database ready at: /Users/manthan/Documents/Ventures/Hemrek Capital/Repository/Bot/Bot-main/pragyam_bot.db
-2026-04-05 18:04:25,760 | ERROR   | pragyam.launcher | Bot failed to start: CRITICAL: TELEGRAM_BOT_TOKEN environment variable is not set.
-Traceback (most recent call last):
-  File "/Users/manthan/Documents/Ventures/Hemrek Capital/Repository/Bot/Bot-main/app.py", line 91, in _ensure_bot_running
-    from bot import main as bot_main
-  File "/Users/manthan/Documents/Ventures/Hemrek Capital/Repository/Bot/Bot-main/bot.py", line 64, in <module>
-    raise ValueError("CRITICAL: TELEGRAM_BOT_TOKEN environment variable is not set.")
-ValueError: CRITICAL: TELEGRAM_BOT_TOKEN environment variable is not set.
